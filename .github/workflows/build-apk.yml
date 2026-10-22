@@ -18,11 +18,16 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
+      # Runner GitHub sudah punya Android SDK; 'android-actions/setup-android'
+      # gagal karena paket 'tools' sudah dihapus dari repo SDK.
       - name: Install SDK packages
-        run: sdkmanager --install "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          SDKM=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin | tail -1)
+          echo "sdkmanager: $SDKM"
+          yes | "$SDKM/sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$SDKM/sdkmanager" --install "platform-tools" "platforms;android-33" "build-tools;33.0.2"
 
       - name: Set up Gradle 7.5
         uses: gradle/actions/setup-gradle@v3
@@ -36,7 +41,7 @@ jobs:
       - name: Show APK info
         run: |
           ls -lh android/app/build/outputs/apk/debug/
-          $ANDROID_HOME/build-tools/33.0.2/aapt2 dump badging android/app/build/outputs/apk/debug/app-debug.apk | head -5
+          "$ANDROID_HOME/build-tools/33.0.2/aapt2" dump badging android/app/build/outputs/apk/debug/app-debug.apk | head -6
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
