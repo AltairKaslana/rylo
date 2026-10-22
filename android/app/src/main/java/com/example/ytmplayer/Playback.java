@@ -46,7 +46,8 @@ public final class Playback {
         this.app = app;
         player = new ExoPlayer.Builder(app)
                 .setLoadControl(new DefaultLoadControl.Builder()
-                        .setBufferDurationsMs(20000, 60000, 1500, 3000).build())
+                        .setBufferDurationsMs(12000, 30000, 1000, 2000)
+                        .setPrioritizeTimeOverSizeThresholds(true).build())
                 .setAudioAttributes(new AudioAttributes.Builder()
                         .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
                 .setHandleAudioBecomingNoisy(true)

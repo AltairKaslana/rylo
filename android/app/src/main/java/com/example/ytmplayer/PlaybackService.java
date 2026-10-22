@@ -19,6 +19,7 @@ import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
 import com.bumptech.glide.Glide;
+import com.bumptech.glide.load.DecodeFormat;
 import com.bumptech.glide.request.target.CustomTarget;
 import com.bumptech.glide.request.transition.Transition;
 import com.google.android.exoplayer2.C;
@@ -66,7 +67,7 @@ public class PlaybackService extends Service implements Playback.Listener {
         else if (A_NEXT.equals(a)) pb.next();
         else if (A_PREV.equals(a)) pb.prev();
         else if (A_STOP.equals(a)) pb.stop();
-        else startForeground(ID, build());
+        else safeForeground();
         return START_NOT_STICKY;
     }
 
@@ -82,9 +83,30 @@ public class PlaybackService extends Service implements Playback.Listener {
             stopSelf();
             return;
         }
-        loadArt();
-        updateSession();
-        startForeground(ID, build());
+        try { loadArt(); } catch (Throwable ignored) { }
+        try { updateSession(); } catch (Throwable ignored) { }
+        safeForeground();
+    }
+
+    /** Notifikasi MediaStyle bisa bermasalah di ROM lama; kalau gagal, pakai notifikasi biasa
+     *  supaya pemutaran tidak ikut mati. */
+    private void safeForeground() {
+        try {
+            startForeground(ID, build());
+        } catch (Throwable t) {
+            try {
+                Item it = pb.current();
+                Notification n = new NotificationCompat.Builder(this, CH)
+                        .setSmallIcon(R.drawable.ic_notif)
+                        .setContentTitle(it != null ? it.title : "Memutar")
+                        .setContentText(it != null ? it.subtitle : "")
+                        .setOnlyAlertOnce(true)
+                        .setContentIntent(PendingIntent.getActivity(this, 0,
+                                new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), 0))
+                        .build();
+                startForeground(ID, n);
+            } catch (Throwable ignored) { }
+        }
     }
 
     private PendingIntent act(String action) {
@@ -127,10 +149,12 @@ public class PlaybackService extends Service implements Playback.Listener {
         if (u == null || u.equals(artFor)) return;
         artFor = u;
         art = null;
-        Glide.with(getApplicationContext()).asBitmap().load(u).into(new CustomTarget<Bitmap>(256, 256) {
+        Glide.with(getApplicationContext()).asBitmap().load(u)
+                .override(128, 128).format(DecodeFormat.PREFER_RGB_565)
+                .into(new CustomTarget<Bitmap>(128, 128) {
             @Override public void onResourceReady(@NonNull Bitmap r, @Nullable Transition<? super Bitmap> t) {
                 if (!u.equals(artFor)) return;
-                art = r.copy(Bitmap.Config.ARGB_8888, false);
+                art = r;
                 nm.notify(ID, build());
             }
 
