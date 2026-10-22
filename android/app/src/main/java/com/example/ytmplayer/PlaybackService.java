@@ -79,6 +79,7 @@ public class PlaybackService extends Service implements Playback.Listener {
     @Override public int onStartCommand(Intent i, int flags, int startId) {
         String a = i == null ? null : i.getAction();
         try {
+            Log2.trace(this, "action=" + a);
             if (Intent.ACTION_MEDIA_BUTTON.equals(a)) {
                 KeyEvent ev = (KeyEvent) i.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
                 if (ev != null && ev.getAction() == KeyEvent.ACTION_DOWN) {
@@ -151,8 +152,8 @@ public class PlaybackService extends Service implements Playback.Listener {
 
     private PendingIntent act(String action) {
         int f = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
-        return PendingIntent.getService(this, action.hashCode(),
-                new Intent(this, PlaybackService.class).setAction(action), f);
+        Intent i = new Intent(this, ActionReceiver.class).putExtra("a", action);
+        return PendingIntent.getBroadcast(this, action.hashCode(), i, f);
     }
 
     private Notification build() {

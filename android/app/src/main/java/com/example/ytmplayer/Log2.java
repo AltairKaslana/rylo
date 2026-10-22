@@ -12,6 +12,26 @@ import java.util.Locale;
 public final class Log2 {
     private Log2() {}
 
+    /** Catat jejak ringan (aksi notifikasi dsb) tanpa mengganggu. */
+    public static void trace(Context c, String line) {
+        try {
+            File dir = c.getExternalFilesDir(null);
+            if (dir == null) dir = c.getFilesDir();
+            if (dir == null) return;
+            dir.mkdirs();
+            File f = new File(dir, "netlog.txt");
+            if (f.length() > 64 * 1024) {
+                File old = new File(dir, "netlog.old.txt");
+                if (old.exists()) old.delete();
+                f.renameTo(old);
+            }
+            FileWriter w = new FileWriter(f, true);
+            w.write(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date())
+                    + " | " + line + "\n");
+            w.close();
+        } catch (Throwable ignored) { }
+    }
+
     /** Tulis ringkasan error, kembalikan teks pendek untuk ditampilkan di layar. */
     public static String write(Context c, String what, Throwable e) {
         String t = e == null ? "error" : e.getClass().getSimpleName();
