@@ -5,7 +5,9 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.ComponentName;
 import android.content.Intent;
+import android.view.KeyEvent;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
@@ -48,16 +50,16 @@ public class PlaybackService extends Service implements Playback.Listener {
             nm.createNotificationChannel(
                     new NotificationChannel(CH, "Pemutaran", NotificationManager.IMPORTANCE_LOW));
         }
-        // API < 21 (KitKat): MediaSessionCompat menuntut MediaButtonReceiver, dan receiver itu
-        // butuh Service ber-intent-filter MEDIA_BUTTON -> kalau tidak ada, sistem crash.
-        // Di KitKat kontrol lockscreen datang dari aksi notifikasi, jadi session tidak diperlukan.
-        if (Build.VERSION.SDK_INT >= 21) {
-            try {
+        // MediaSessionCompat menuntut MediaButtonReceiver, dan receiver itu mencari Service
+        // ber-intent-filter MEDIA_BUTTON (sudah didaftarkan di manifest). Tanpa itu -> crash.
+        try {
+            if (Build.VERSION.SDK_INT >= 21) {
                 session = new MediaSessionCompat(this, "ytm");
-            } catch (Throwable t) {
-                session = null;
+            } else {
+                session = new MediaSessionCompat(this, "ytm",
+                        new ComponentName(this, androidx.media.session.MediaButtonReceiver.class), null);
             }
-        } else {
+        } catch (Throwable t) {
             session = null;
         }
         if (session != null) {
@@ -77,7 +79,22 @@ public class PlaybackService extends Service implements Playback.Listener {
     @Override public int onStartCommand(Intent i, int flags, int startId) {
         String a = i == null ? null : i.getAction();
         try {
-            if (A_TOGGLE.equals(a)) pb.toggle();
+            if (Intent.ACTION_MEDIA_BUTTON.equals(a)) {
+                KeyEvent ev = (KeyEvent) i.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
+                if (ev != null && ev.getAction() == KeyEvent.ACTION_DOWN) {
+                    switch (ev.getKeyCode()) {
+                        case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                        case KeyEvent.KEYCODE_HEADSETHOOK: pb.toggle(); break;
+                        case KeyEvent.KEYCODE_MEDIA_PLAY: if (!pb.active()) pb.toggle(); break;
+                        case KeyEvent.KEYCODE_MEDIA_PAUSE: if (pb.active()) pb.toggle(); break;
+                        case KeyEvent.KEYCODE_MEDIA_NEXT: pb.next(); break;
+                        case KeyEvent.KEYCODE_MEDIA_PREVIOUS: pb.prev(); break;
+                        case KeyEvent.KEYCODE_MEDIA_STOP: pb.stop(); break;
+                        default: break;
+                    }
+                }
+            }
+            else if (A_TOGGLE.equals(a)) pb.toggle();
             else if (A_NEXT.equals(a)) pb.next();
             else if (A_PREV.equals(a)) pb.prev();
             else if (A_STOP.equals(a)) pb.stop();
@@ -87,7 +104,7 @@ public class PlaybackService extends Service implements Playback.Listener {
             // jangan biarkan aksi notifikasi/lockscreen mematikan aplikasi
             Log2.write(this, "ACTION " + a, t);
         }
-        return START_NOT_STICKY;
+        return START_STICKY;
     }
 
     @Override public void onDestroy() {

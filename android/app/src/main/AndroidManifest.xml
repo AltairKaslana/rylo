@@ -23,6 +23,15 @@
         </activity>
         <activity android:name=".PlayerActivity" android:exported="false"
             android:screenOrientation="portrait"/>
-        <service android:name=".PlaybackService" android:exported="false"/>
+        <service android:name=".PlaybackService" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON"/>
+            </intent-filter>
+        </service>
+        <receiver android:name="androidx.media.session.MediaButtonReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON"/>
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
