@@ -128,6 +128,31 @@ public final class Api {
         });
     }
 
+    /** Cek cepat: apakah server hidup dan PIN diterima. */
+    public static void ping(Context c, final Cb<String> cb) {
+        final Context app = c.getApplicationContext();
+        if (Prefs.server(app).isEmpty()) { cb.err("Alamat server masih kosong"); return; }
+        Request req;
+        try {
+            req = new Request.Builder().url(Prefs.server(app) + "/health")
+                    .header("X-Token", Prefs.token(app)).build();
+        } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
+        HTTP.newCall(req).enqueue(new Callback() {
+            @Override public void onFailure(Call call, IOException e) {
+                UI.post(() -> cb.err("Tidak bisa terhubung - cek alamat & Wi-Fi"));
+            }
+            @Override public void onResponse(Call call, Response resp) {
+                final int code = resp.code();
+                resp.close();
+                UI.post(() -> {
+                    if (code == 200) cb.ok("Tersambung");
+                    else if (code == 401) cb.err("PIN salah");
+                    else cb.err("Server " + code);
+                });
+            }
+        });
+    }
+
     public static void home(Context c, Cb<Home> cb) { get(c, "/home", 300000, Home.class, cb); }
 
     public static void search(Context c, String q, String kind, Cb<Items> cb) {

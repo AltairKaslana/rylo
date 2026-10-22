@@ -33,6 +33,14 @@ def yt():
     return _client
 
 
+def reset():
+    """Paksa klien dibuat ulang (dipakai setelah browser.json dipasang)."""
+    global _client, _authed
+    with _lock:
+        _client = None
+        _authed = None
+
+
 def _thumb(x):
     t = x.get("thumbnails") or x.get("thumbnail") or []
     return t[-1]["url"] if t else ""

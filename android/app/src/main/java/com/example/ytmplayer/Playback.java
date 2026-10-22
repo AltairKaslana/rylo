@@ -78,7 +78,11 @@ public final class Playback {
     public void addListener(Listener l) { listeners.add(l); }
     public void removeListener(Listener l) { listeners.remove(l); }
 
-    private void fire() { for (Listener l : listeners) l.onChange(); }
+    private void fire() {
+        for (Listener l : listeners) {
+            try { l.onChange(); } catch (Throwable ignored) { }
+        }
+    }
 
     private MediaItem mediaItem(Item s) {
         return new MediaItem.Builder().setUri(Api.stream(app, s.id)).setMediaId(s.id).build();

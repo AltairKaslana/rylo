@@ -83,6 +83,7 @@ public class PlaybackService extends Service implements Playback.Listener {
         else if (A_PREV.equals(a)) pb.prev();
         else if (A_STOP.equals(a)) pb.stop();
         else safeForeground();
+        if (pb.hasQueue()) safeForeground();
         return START_NOT_STICKY;
     }
 
@@ -93,6 +94,10 @@ public class PlaybackService extends Service implements Playback.Listener {
     }
 
     @Override public void onChange() {
+        try { refresh(); } catch (Throwable ignored) { }
+    }
+
+    private void refresh() {
         if (!pb.hasQueue()) {
             stopForeground(true);
             stopSelf();
@@ -132,6 +137,7 @@ public class PlaybackService extends Service implements Playback.Listener {
 
     private Notification build() {
         Item it = pb.current();
+        if (art != null && art.isRecycled()) art = null;
         boolean playing = pb.active();
         int f = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
         PendingIntent open = PendingIntent.getActivity(this, 0,
@@ -172,7 +178,7 @@ public class PlaybackService extends Service implements Playback.Listener {
             @Override public void onResourceReady(@NonNull Bitmap r, @Nullable Transition<? super Bitmap> t) {
                 if (!u.equals(artFor)) return;
                 art = r;
-                nm.notify(ID, build());
+                try { nm.notify(ID, build()); } catch (Throwable ignored) { }
             }
 
             @Override public void onLoadCleared(@Nullable Drawable d) { }

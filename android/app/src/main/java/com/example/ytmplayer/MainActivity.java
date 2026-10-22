@@ -131,22 +131,52 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
         box.setOrientation(LinearLayout.VERTICAL);
         int p = Ui.dp(this, 20);
         box.setPadding(p, p / 2, p, 0);
-        final EditText s = field("http://192.168.1.10:8000", Prefs.server(this));
-        final EditText t = field("Token", Prefs.token(this));
-        t.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+
+        TextView info = new TextView(this);
+        info.setText("Alamat server dan PIN ada di server (file /opt/ytm-relay/env).");
+        info.setTextSize(12);
+        info.setTextColor(0xFF9AA0A6);
+        info.setPadding(0, 0, 0, Ui.dp(this, 10));
+        box.addView(info);
+
+        final EditText s = field("http://192.168.1.9:8000", Prefs.server(this));
+        final EditText t = field("PIN (misal 4821)", Prefs.token(this));
+        t.setInputType(InputType.TYPE_CLASS_NUMBER);
+        t.setTextSize(22);
+        t.setGravity(android.view.Gravity.CENTER);
         box.addView(s);
         box.addView(t);
+
+        final TextView status = new TextView(this);
+        status.setTextSize(12);
+        status.setTextColor(0xFF9AA0A6);
+        status.setPadding(0, Ui.dp(this, 8), 0, 0);
+        box.addView(status);
+
         new AlertDialog.Builder(this, R.style.DialogTheme)
                 .setTitle("Server relay")
                 .setView(box)
                 .setCancelable(!first)
                 .setPositiveButton("Simpan", (d, w) -> {
-                    Prefs.save(this, s.getText().toString(), t.getText().toString());
+                    String srv = s.getText().toString().trim();
+                    String pin = t.getText().toString().trim();
+                    if (srv.isEmpty() || pin.isEmpty()) {
+                        toast("Alamat dan PIN belum lengkap");
+                        return;
+                    }
+                    Prefs.save(this, srv, pin);
                     Api.clearCache();
-                    select(tab < 0 ? 0 : tab);
+                    Api.ping(this, new Api.Cb<String>() {
+                        @Override public void ok(String r) { toast(r); select(tab < 0 ? 0 : tab); }
+                        @Override public void err(String m) { toast(m); }
+                    });
                 })
                 .setNegativeButton("Batal", null)
                 .show();
+    }
+
+    private void toast(String m) {
+        android.widget.Toast.makeText(this, m, android.widget.Toast.LENGTH_SHORT).show();
     }
 
     private EditText field(String hint, String value) {

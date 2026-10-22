@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from PIL import Image, ImageOps
 from starlette.background import BackgroundTask
 
@@ -19,10 +19,16 @@ if not config.TOKEN:
     raise RuntimeError("Environment variable YTM_TOKEN belum diisi")
 
 
+def _same(a: str, b: str) -> bool:
+    return bool(a) and bool(b) and secrets.compare_digest(a.encode(), b.encode())
+
+
 def auth(x_token: str = Header(None), t: str = Query(None)):
-    given = (x_token or t or "").encode()
-    if not secrets.compare_digest(given, config.TOKEN.encode()):
-        raise HTTPException(401, "Token salah")
+    """Terima token panjang (YTM_TOKEN) atau PIN pendek (YTM_PIN) - PIN untuk diketik di HP."""
+    given = x_token or t or ""
+    if _same(given, config.TOKEN) or _same(given, config.PIN):
+        return
+    raise HTTPException(401, "Token/PIN salah")
 
 
 app = FastAPI(dependencies=[Depends(auth)], docs_url=None, redoc_url=None, openapi_url=None)
@@ -183,3 +189,73 @@ async def stream(vid: str, request: Request):
 
     return StreamingResponse(up.aiter_raw(), status_code=up.status_code, headers=out,
                              background=BackgroundTask(close))
+
+SETUP_HTML = """<!doctype html><html><head><meta charset="utf-8">
+<title>Login YouTube Music</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+ body{background:#0d1117;color:#c9d1d9;font:15px/1.6 system-ui,Segoe UI,sans-serif;margin:0;padding:20px;max-width:760px}
+ h1{font-size:19px;margin:0 0 6px} h2{font-size:15px;margin:22px 0 6px;color:#58a6ff}
+ code,pre{background:#161b22;border:1px solid #30363d;border-radius:6px}
+ pre{padding:10px;overflow:auto;font-size:12.5px}
+ textarea{width:100%;height:170px;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:8px;padding:10px;font:12.5px/1.5 monospace}
+ button{background:#238636;color:#fff;border:0;border-radius:8px;padding:11px 18px;font-size:15px;margin-top:10px}
+ .ok{color:#3fb950}.bad{color:#f85149} .muted{color:#8b949e;font-size:13px}
+ ol{padding-left:20px} li{margin:4px 0}
+</style></head><body>
+<h1>Login YouTube Music</h1>
+<p class="muted">Sekali saja. Setelah tersimpan, tab Pustaka dan beranda personal akan aktif.</p>
+<h2>1. Ambil header dari browser (di PC)</h2>
+<ol>
+<li>Buka <b>music.youtube.com</b> di Chrome/Firefox, pastikan sudah login.</li>
+<li>Tekan <b>F12</b> &rarr; tab <b>Network</b> &rarr; tekan <b>F5</b>.</li>
+<li>Klik request pertama (biasanya <code>music.youtube.com</code> atau <code>browse</code>).</li>
+<li>Di panel kanan: tab <b>Headers</b> &rarr; bagian <b>Request Headers</b>.</li>
+<li>Klik kanan &rarr; <b>Copy</b> &rarr; <b>Copy request headers</b> (atau blok seluruhnya).</li>
+</ol>
+<h2>2. Tempel di sini</h2>
+<textarea id="h" placeholder="cookie: HSID=...; SSID=...; SID=...&#10;user-agent: Mozilla/5.0 ...&#10;x-goog-authuser: 0"></textarea>
+<div id="r" class="muted"></div>
+<button onclick="save()">Simpan</button>
+<h2>Catatan</h2>
+<p class="muted">Header ini setara kunci akun. Disimpan hanya di server ini
+(<code>/opt/ytm-relay/browser.json</code>, izin 600) dan tidak pernah dikirim ke tempat lain.
+Pakai akun khusus bila ingin memisahkan risiko.</p>
+<script>
+async function save(){
+  const t=document.getElementById('h').value.trim();
+  const r=document.getElementById('r');
+  if(!t){ r.className='bad'; r.textContent='Masih kosong.'; return; }
+  r.className='muted'; r.textContent='Menyimpan...';
+  try{
+    const res=await fetch('/setup?t='+encodeURIComponent(location.search.replace('?t=','')),{method:'POST',headers:{'Content-Type':'text/plain'},body:t});
+    const j=await res.json();
+    if(res.ok){ r.className='ok'; r.textContent='Berhasil. authed='+j.authed+' - buka tab Pustaka di aplikasi.'; }
+    else { r.className='bad'; r.textContent='Gagal: '+(j.detail||res.status); }
+  }catch(e){ r.className='bad'; r.textContent='Gagal menghubungi server.'; }
+}
+</script></body></html>"""
+
+
+@app.get("/setup", response_class=HTMLResponse)
+def setup_page():
+    return SETUP_HTML
+
+
+@app.post("/setup")
+async def setup_save(request: Request):
+    """Simpan browser.json dari header yang ditempel pengguna (tidak lewat chat)."""
+    raw = (await request.body()).decode("utf-8", "replace").strip()
+    if "cookie" not in raw.lower():
+        raise HTTPException(400, "Header harus memuat baris Cookie")
+    target = config.AUTH_FILE if os.path.isabs(config.AUTH_FILE) else os.path.join(os.getcwd(), config.AUTH_FILE)
+    try:
+        from ytmusicapi import setup as ytm_setup
+        ytm_setup(filepath=target, headers_raw=raw)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Header tidak valid: {type(e).__name__}: {str(e)[:200]}")
+    try:
+        os.chmod(target, 0o600)
+    except OSError:
+        pass
+    catalog.reset()
+    return {"ok": True, "authed": catalog.authed()}
