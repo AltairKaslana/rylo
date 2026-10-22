@@ -40,6 +40,7 @@ public final class Api {
     public static class Home { public List<Section> sections; }
     public static class Detail { public String kind, id, title, subtitle, thumb; public List<Item> tracks; }
     public static class Lyrics { public String lyrics; }
+    public static class Suggest { public java.util.List<String> items; }
 
     private static final OkHttpClient HTTP = buildClient();
 
@@ -161,6 +162,11 @@ public final class Api {
                 });
             }
         });
+    }
+
+    /** Saran pencarian saat mengetik. */
+    public static void suggest(Context c, String q, Cb<Suggest> cb) {
+        get(c, "/suggest?q=" + enc(q), 300000, Suggest.class, cb);
     }
 
     public static void home(Context c, Cb<Home> cb) { get(c, "/home", 300000, Home.class, cb); }

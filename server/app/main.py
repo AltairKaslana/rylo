@@ -106,6 +106,13 @@ def auth_status():
     return {"authed": ok, "logged_in": catalog.session_alive() if ok else False}
 
 
+@app.get("/suggest")
+def suggest(q: str):
+    if len(q.strip()) < 2:
+        return {"items": []}
+    return {"items": call(catalog.suggest, q)}
+
+
 @app.get("/library")
 def library():
     if not catalog.authed():

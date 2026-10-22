@@ -153,6 +153,10 @@ public final class Playback {
     }
 
     public void toggle() {
+        try { toggleInner(); } catch (Throwable t) { Log2.write(app, "toggle", t); }
+    }
+
+    private void toggleInner() {
         if (player.isPlaying()) { player.pause(); return; }
         int s = player.getPlaybackState();
         if (s == Player.STATE_IDLE) player.prepare();
@@ -160,7 +164,10 @@ public final class Playback {
         player.play();
     }
 
-    public void next() { if (player.hasNextMediaItem()) player.seekToNextMediaItem(); }
+    public void next() {
+        try { if (player.hasNextMediaItem()) player.seekToNextMediaItem(); }
+        catch (Throwable t) { Log2.write(app, "next", t); }
+    }
 
     public void prev() {
         if (player.getCurrentPosition() > 3000 || !player.hasPreviousMediaItem()) player.seekTo(0);

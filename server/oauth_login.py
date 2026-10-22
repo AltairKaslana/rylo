@@ -40,27 +40,35 @@ def main():
     sys.stdout.flush()
 
     deadline = time.time() + expires
+    tok = None
     last = ""
     while time.time() < deadline:
+        pending = None
         try:
-            tok = creds.token_from_code(device_code)
-            break
+            r = creds.token_from_code(device_code)
         except Exception as e:  # noqa: BLE001
-            msg = str(e)
-            low = msg.lower()
+            r = {"error": type(e).__name__, "error_description": str(e)}
+        # Google mengembalikan error sebagai dict, bukan exception
+        if isinstance(r, dict) and r.get("error"):
+            err = str(r.get("error"))
+            low = (err + " " + str(r.get("error_description", ""))).lower()
             if "authorization_pending" in low or "slow_down" in low:
-                if msg != last:
-                    print("menunggu persetujuan...")
-                    sys.stdout.flush()
-                    last = msg
-                time.sleep(interval + (5 if "slow_down" in low else 0))
-                continue
-            if "expired_token" in low or "access_denied" in low:
-                print("GAGAL:", msg)
+                pending = "slow_down" if "slow_down" in low else "pending"
+            elif "expired_token" in low or "access_denied" in low:
+                print("GAGAL:", err, r.get("error_description", ""))
                 return 3
-            print("error:", type(e).__name__, msg[:200])
-            time.sleep(interval)
-    else:
+            else:
+                print("GAGAL:", err, r.get("error_description", ""))
+                return 3
+        else:
+            tok = r
+            break
+        if last != pending:
+            print("menunggu persetujuan...")
+            sys.stdout.flush()
+            last = pending
+        time.sleep(interval + (5 if pending == "slow_down" else 0))
+    if tok is None:
         print("GAGAL: kode kedaluwarsa sebelum disetujui")
         return 4
 

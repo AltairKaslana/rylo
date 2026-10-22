@@ -137,4 +137,40 @@ public final class Adapters {
             h.rv.setAdapter(new Cards(s.items, cb));
         }
     }
+
+    // ---------- Saran pencarian (teks saja) ----------
+    public static class Suggests extends RecyclerView.Adapter<Suggests.VH> {
+        public interface OnPick { void pick(String s); }
+
+        static class VH extends RecyclerView.ViewHolder {
+            final TextView title;
+            VH(View v) { super(v); title = v.findViewById(R.id.title); }
+        }
+
+        private final java.util.List<String> data;
+        private final OnPick cb;
+
+        public Suggests(java.util.List<String> data, OnPick cb) {
+            this.data = data;
+            this.cb = cb;
+        }
+
+        @Override public int getItemCount() { return data == null ? 0 : data.size(); }
+
+        @NonNull @Override public VH onCreateViewHolder(@NonNull ViewGroup parent, int type) {
+            return new VH(LayoutInflater.from(parent.getContext()).inflate(R.layout.item_row, parent, false));
+        }
+
+        @Override public void onBindViewHolder(@NonNull VH h, int p) {
+            final String s = data.get(p);
+            h.title.setText(s);
+            View sub = h.itemView.findViewById(R.id.sub);
+            View dur = h.itemView.findViewById(R.id.dur);
+            View cover = h.itemView.findViewById(R.id.cover);
+            if (sub != null) sub.setVisibility(View.GONE);
+            if (dur != null) dur.setVisibility(View.GONE);
+            if (cover != null) cover.setVisibility(View.GONE);
+            h.itemView.setOnClickListener(x -> cb.pick(s));
+        }
+    }
 }

@@ -76,12 +76,17 @@ public class PlaybackService extends Service implements Playback.Listener {
 
     @Override public int onStartCommand(Intent i, int flags, int startId) {
         String a = i == null ? null : i.getAction();
-        if (A_TOGGLE.equals(a)) pb.toggle();
-        else if (A_NEXT.equals(a)) pb.next();
-        else if (A_PREV.equals(a)) pb.prev();
-        else if (A_STOP.equals(a)) pb.stop();
-        else safeForeground();
-        if (pb.hasQueue()) safeForeground();
+        try {
+            if (A_TOGGLE.equals(a)) pb.toggle();
+            else if (A_NEXT.equals(a)) pb.next();
+            else if (A_PREV.equals(a)) pb.prev();
+            else if (A_STOP.equals(a)) pb.stop();
+            else safeForeground();
+            if (pb.hasQueue()) safeForeground();
+        } catch (Throwable t) {
+            // jangan biarkan aksi notifikasi/lockscreen mematikan aplikasi
+            Log2.write(this, "ACTION " + a, t);
+        }
         return START_NOT_STICKY;
     }
 

@@ -148,7 +148,13 @@ def _artist_tracks(d):
 
 
 def session_alive():
-    """Cek apakah cookie di browser.json masih sesi aktif (Google sering membatalkannya)."""
+    """Cek apakah kredensial di file auth masih hidup (cookie bisa dibatalkan Google)."""
+    if _oauth_mode():
+        try:
+            yt().get_library_playlists(limit=1)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
     try:
         import json as _json
         import httpx
@@ -187,6 +193,14 @@ def detail(kind, iid):
     songs = [i for i in _clean(tracks, thumb) if i["kind"] == "song"]
     return {"kind": kind, "id": iid, "title": d.get("title") or "", "subtitle": sub,
             "thumb": thumb, "tracks": songs}
+
+
+def suggest(q):
+    """Saran pencarian saat pengguna mengetik."""
+    try:
+        return list(yt().get_search_suggestions(q))[:10]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def radio(vid):
