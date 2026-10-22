@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import threading
+import time
 from urllib.parse import urlparse
 
 import httpx
@@ -206,11 +207,11 @@ SETUP_HTML = """<!doctype html><html><head><meta charset="utf-8">
 <p class="muted">Sekali saja. Setelah tersimpan, tab Pustaka dan beranda personal akan aktif.</p>
 <h2>1. Ambil header dari browser (di PC)</h2>
 <ol>
-<li>Buka <b>music.youtube.com</b> di Chrome/Firefox, pastikan sudah login.</li>
-<li>Tekan <b>F12</b> &rarr; tab <b>Network</b> &rarr; tekan <b>F5</b>.</li>
-<li>Klik request pertama (biasanya <code>music.youtube.com</code> atau <code>browse</code>).</li>
-<li>Di panel kanan: tab <b>Headers</b> &rarr; bagian <b>Request Headers</b>.</li>
-<li>Klik kanan &rarr; <b>Copy</b> &rarr; <b>Copy request headers</b> (atau blok seluruhnya).</li>
+<li>Buka <b>music.youtube.com</b> di Chrome/Firefox, pastikan avatar akun muncul di kanan atas.</li>
+<li>Tekan <b>F12</b> &rarr; tab <b>Network</b> &rarr; pilih filter <b>Fetch/XHR</b>.</li>
+<li>Tekan <b>F5</b>, lalu klik request bernama <b>browse</b> atau <b>account_menu</b>.</li>
+<li>Panel kanan: tab <b>Headers</b> &rarr; <b>Request Headers</b> &rarr; klik kanan &rarr; <b>Copy request headers</b>.</li>
+<li>Pastikan blok itu memuat baris <code>Authorization: SAPISIDHASH ...</code> dan <code>Cookie: ... SID=...</code>.</li>
 </ol>
 <h2>2. Tempel di sini</h2>
 <textarea id="h" placeholder="cookie: HSID=...; SSID=...; SID=...&#10;user-agent: Mozilla/5.0 ...&#10;x-goog-authuser: 0"></textarea>
@@ -241,12 +242,70 @@ def setup_page():
     return SETUP_HTML
 
 
+SAPISID_RE = re.compile(r"(?:__Secure-3PAPISID|SAPISID|__Secure-1PAPISID)=([^;\s]+)")
+
+
+def _authorization(raw: str) -> str:
+    """Header Authorization: SAPISIDHASH yang dipakai ytmusicapi untuk mendeteksi login.
+
+    Request dokumen (GET /) tidak membawa header ini, jadi dihitung sendiri dari cookie:
+    sha1("<ts> <sapisid> https://music.youtube.com").
+    """
+    m = SAPISID_RE.search(raw)
+    if not m:
+        return ""
+    ts = int(time.time())
+    digest = hashlib.sha1(
+        f"{ts} {m.group(1)} https://music.youtube.com".encode()).hexdigest()
+    return f"SAPISIDHASH {ts}_{digest}"
+
+
+def _logged_in(cookie: str, raw: str) -> bool:
+    """Cek jujur: apakah cookie ini benar-benar sesi login YouTube Music."""
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0"
+    for line in raw.splitlines():
+        if line.lower().startswith("user-agent:"):
+            ua = line.split(":", 1)[1].strip()
+            break
+    try:
+        import httpx
+        r = httpx.get("https://music.youtube.com/", timeout=25, follow_redirects=True,
+                      headers={"Cookie": cookie, "User-Agent": ua,
+                               "Accept-Language": "en-US,en;q=0.9"})
+        return '"LOGGED_IN": true' in r.text or '"LOGGED_IN":true' in r.text
+    except Exception:  # noqa: BLE001
+        return False
+
+
 @app.post("/setup")
 async def setup_save(request: Request):
     """Simpan browser.json dari header yang ditempel pengguna (tidak lewat chat)."""
     raw = (await request.body()).decode("utf-8", "replace").strip()
     if "cookie" not in raw.lower():
         raise HTTPException(400, "Header harus memuat baris Cookie")
+    # Request dokumen tidak membawa header-header ini; lengkapi supaya ytmusicapi menerimanya.
+    if "authorization:" not in raw.lower():
+        authz = _authorization(raw)
+        if not authz:
+            raise HTTPException(400, "Cookie tidak memuat SAPISID - pastikan sudah login di music.youtube.com")
+        raw += "\nAuthorization: " + authz
+    if "x-goog-authuser" not in raw.lower():
+        raw += "\nX-Goog-AuthUser: 0"
+    if "origin:" not in raw.lower():
+        raw += "\nOrigin: https://music.youtube.com"
+    # Verifikasi dulu: cookie yang benar-benar login membuat YouTube mengembalikan LOGGED_IN true.
+    cookie = ""
+    for line in raw.splitlines():
+        if line.lower().startswith("cookie:"):
+            cookie = line.split(":", 1)[1].strip()
+            break
+    if not cookie:
+        raise HTTPException(400, "Baris Cookie tidak ditemukan")
+    if not _logged_in(cookie, raw):
+        raise HTTPException(400,
+                            "Cookie tidak valid atau sesi sudah berakhir - YouTube menyebut belum login. "
+                            "Salin ulang header dari request XHR 'browse' saat avatar akun terlihat di kanan atas.")
+
     target = config.AUTH_FILE if os.path.isabs(config.AUTH_FILE) else os.path.join(os.getcwd(), config.AUTH_FILE)
     try:
         from ytmusicapi import setup as ytm_setup
