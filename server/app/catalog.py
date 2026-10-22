@@ -23,13 +23,32 @@ def authed():
     return _authed
 
 
+def _oauth_mode() -> bool:
+    """True kalau file auth berisi token OAuth (bukan cookie browser)."""
+    if not (config.OAUTH_ID and config.OAUTH_SECRET):
+        return False
+    try:
+        import json as _json
+        with open(config.AUTH_FILE, encoding="utf-8") as f:
+            return "refresh_token" in _json.load(f)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def yt():
     """Klien YTMusic tunggal, dibuat saat pertama dibutuhkan."""
     global _client
     if _client is None:
         with _lock:
             if _client is None:
-                _client = YTMusic(config.AUTH_FILE) if authed() else YTMusic()
+                if _oauth_mode():
+                    from ytmusicapi.auth.oauth import OAuthCredentials
+                    creds = OAuthCredentials(config.OAUTH_ID, config.OAUTH_SECRET)
+                    _client = YTMusic(config.AUTH_FILE, oauth_credentials=creds)
+                elif authed():
+                    _client = YTMusic(config.AUTH_FILE)
+                else:
+                    _client = YTMusic()
     return _client
 
 
