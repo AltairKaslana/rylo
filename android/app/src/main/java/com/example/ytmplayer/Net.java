@@ -137,8 +137,19 @@ public final class Net {
 
         private Socket fix(Socket s) {
             if (s instanceof SSLSocket) {
+                SSLSocket ssl = (SSLSocket) s;
                 try {
-                    ((SSLSocket) s).setEnabledProtocols(new String[]{"TLSv1.2"});
+                    ssl.setEnabledProtocols(new String[]{"TLSv1.2"});
+                } catch (Throwable ignored) { }
+                try {
+                    // Funnel Tailscale memakai sertifikat ECDSA; KitKat kadang hanya menawarkan cipher RSA.
+                    java.util.List<String> on = new java.util.ArrayList<String>();
+                    for (String c : ssl.getSupportedCipherSuites()) {
+                        if (c.startsWith("TLS_ECDHE_ECDSA_") || c.startsWith("TLS_ECDHE_RSA_")) on.add(c);
+                    }
+                    if (!on.isEmpty()) {
+                        ssl.setEnabledCipherSuites(on.toArray(new String[on.size()]));
+                    }
                 } catch (Throwable ignored) { }
             }
             return s;
