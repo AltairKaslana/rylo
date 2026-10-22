@@ -1,0 +1,175 @@
+package com.example.ytmplayer;
+
+import android.content.Context;
+
+import java.io.InputStream;
+import java.net.InetAddress;
+import java.net.Socket;
+import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.List;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
+
+/**
+ * Android 4.4 tidak punya root CA Let's Encrypt (ISRG Root X1/X2) dan sebagian build
+ * belum mengaktifkan TLS 1.2 secara default. Kelas ini menambal keduanya:
+ *  - menambah ISRG Root X1 + X2 sebagai trust anchor tambahan (bukan trust-all)
+ *  - memaksa protokol TLS 1.2 pada socket
+ * Dipasang sekali di App.onCreate dan dipakai juga oleh OkHttp (Api).
+ */
+public final class Net {
+    private static SSLSocketFactory factory;
+    private static X509TrustManager trust;
+
+    private Net() {}
+
+    public static synchronized void install(Context c) {
+        if (factory != null) return;
+        try {
+            KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
+            ks.load(null, null);
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            int[] raws = {R.raw.isrg_x1, R.raw.isrg_x2};
+            for (int raw : raws) {
+                InputStream in = c.getResources().openRawResource(raw);
+                int i = 0;
+                try {
+                    for (Certificate cert : cf.generateCertificates(in)) {
+                        ks.setCertificateEntry("isrg" + raw + "_" + i, cert);
+                        i++;
+                    }
+                } finally {
+                    in.close();
+                }
+            }
+
+            TrustManagerFactory extra = TrustManagerFactory.getInstance(
+                    TrustManagerFactory.getDefaultAlgorithm());
+            extra.init(ks);
+            TrustManagerFactory def = TrustManagerFactory.getInstance(
+                    TrustManagerFactory.getDefaultAlgorithm());
+            def.init((KeyStore) null);
+
+            trust = new Composite(firstX509(def.getTrustManagers()), firstX509(extra.getTrustManagers()));
+            SSLContext ctx = SSLContext.getInstance("TLS");
+            ctx.init(null, new TrustManager[]{trust}, null);
+            factory = new Tls12(ctx.getSocketFactory());
+            HttpsURLConnection.setDefaultSSLSocketFactory(factory);
+        } catch (Throwable ignored) {
+            factory = null;
+            trust = null;
+        }
+    }
+
+    public static SSLSocketFactory socketFactory() { return factory; }
+
+    public static X509TrustManager trustManager() { return trust; }
+
+    private static X509TrustManager firstX509(TrustManager[] tms) {
+        if (tms != null) {
+            for (TrustManager tm : tms) {
+                if (tm instanceof X509TrustManager) return (X509TrustManager) tm;
+            }
+        }
+        return null;
+    }
+
+    /** Coba validasi normal dulu; kalau gagal, coba pakai trust anchor tambahan. */
+    private static final class Composite implements X509TrustManager {
+        private final X509TrustManager a, b;
+
+        Composite(X509TrustManager a, X509TrustManager b) {
+            this.a = a;
+            this.b = b;
+        }
+
+        @Override public void checkClientTrusted(X509Certificate[] chain, String authType)
+                throws java.security.cert.CertificateException {
+            if (a != null) a.checkClientTrusted(chain, authType);
+            else if (b != null) b.checkClientTrusted(chain, authType);
+        }
+
+        @Override public void checkServerTrusted(X509Certificate[] chain, String authType)
+                throws java.security.cert.CertificateException {
+            if (a != null) {
+                try {
+                    a.checkServerTrusted(chain, authType);
+                    return;
+                } catch (java.security.cert.CertificateException ignored) { }
+            }
+            if (b != null) {
+                b.checkServerTrusted(chain, authType);
+                return;
+            }
+            throw new java.security.cert.CertificateException("tidak ada trust anchor");
+        }
+
+        @Override public X509Certificate[] getAcceptedIssuers() {
+            List<X509Certificate> all = new ArrayList<X509Certificate>();
+            if (a != null) {
+                X509Certificate[] t = a.getAcceptedIssuers();
+                if (t != null) for (X509Certificate x : t) all.add(x);
+            }
+            if (b != null) {
+                X509Certificate[] t = b.getAcceptedIssuers();
+                if (t != null) for (X509Certificate x : t) all.add(x);
+            }
+            return all.toArray(new X509Certificate[all.size()]);
+        }
+    }
+
+    /** Bungkus factory: aktifkan TLS 1.2 di setiap socket. */
+    private static final class Tls12 extends SSLSocketFactory {
+        private final SSLSocketFactory inner;
+
+        Tls12(SSLSocketFactory inner) { this.inner = inner; }
+
+        private Socket fix(Socket s) {
+            if (s instanceof SSLSocket) {
+                try {
+                    ((SSLSocket) s).setEnabledProtocols(new String[]{"TLSv1.2"});
+                } catch (Throwable ignored) { }
+            }
+            return s;
+        }
+
+        @Override public String[] getDefaultCipherSuites() { return inner.getDefaultCipherSuites(); }
+
+        @Override public String[] getSupportedCipherSuites() { return inner.getSupportedCipherSuites(); }
+
+        @Override public Socket createSocket(Socket s, String host, int port, boolean autoClose)
+                throws java.io.IOException {
+            return fix(inner.createSocket(s, host, port, autoClose));
+        }
+
+        @Override public Socket createSocket(String host, int port)
+                throws java.io.IOException {
+            return fix(inner.createSocket(host, port));
+        }
+
+        @Override public Socket createSocket(String host, int port, InetAddress localHost, int localPort)
+                throws java.io.IOException {
+            return fix(inner.createSocket(host, port, localHost, localPort));
+        }
+
+        @Override public Socket createSocket(InetAddress host, int port) throws java.io.IOException {
+            return fix(inner.createSocket(host, port));
+        }
+
+        @Override public Socket createSocket(InetAddress address, int port, InetAddress localAddress,
+                                             int localPort) throws java.io.IOException {
+            return fix(inner.createSocket(address, port, localAddress, localPort));
+        }
+    }
+}

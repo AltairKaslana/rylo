@@ -41,8 +41,16 @@ public final class Api {
     public static class Detail { public String kind, id, title, subtitle, thumb; public List<Item> tracks; }
     public static class Lyrics { public String lyrics; }
 
-    private static final OkHttpClient HTTP = new OkHttpClient.Builder()
-            .connectTimeout(8, TimeUnit.SECONDS).readTimeout(40, TimeUnit.SECONDS).build();
+    private static final OkHttpClient HTTP = buildClient();
+
+    private static OkHttpClient buildClient() {
+        OkHttpClient.Builder b = new OkHttpClient.Builder()
+                .connectTimeout(8, TimeUnit.SECONDS).readTimeout(40, TimeUnit.SECONDS);
+        if (Net.socketFactory() != null && Net.trustManager() != null) {
+            b.sslSocketFactory(Net.socketFactory(), Net.trustManager());
+        }
+        return b.build();
+    }
     private static final Gson GSON = new Gson();
     private static final Handler UI = new Handler(Looper.getMainLooper());
     private static final Map<String, Object[]> CACHE = new HashMap<>();
