@@ -482,8 +482,9 @@ def lib_search(q: str):
 @app.post("/lib/import")
 def lib_import():
     """Impor playlist dari akun YouTube (butuh login). Sekali pakai, hasilnya jadi playlist lokal."""
-    if not catalog.authed():
-        raise HTTPException(403, "Perlu login YouTube untuk impor")
+    if not (catalog.authed() and catalog.session_alive()):
+        raise HTTPException(403, "Perlu login YouTube yang masih aktif untuk impor. "
+                                 "Semua fitur lokal tetap jalan tanpa login.")
     created = []
     for src in call(catalog.library):
         if not str(src.get("id", "")).startswith(("PL", "LM", "VL")):
