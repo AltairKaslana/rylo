@@ -24,11 +24,43 @@ def _same(a: str, b: str) -> bool:
     return bool(a) and bool(b) and secrets.compare_digest(a.encode(), b.encode())
 
 
-def auth(x_token: str = Header(None), t: str = Query(None)):
+_FAILS = {}
+_FAIL_LIMIT = 8          # salah PIN sebanyak ini...
+_FAIL_WINDOW = 600       # ...dalam 10 menit
+_BLOCK_TIME = 600        # ...maka diblokir 10 menit
+
+
+def _rate_check(ip: str) -> bool:
+    """True kalau IP masih boleh mencoba."""
+    rec = _FAILS.get(ip)
+    if not rec:
+        return True
+    if rec.get("until", 0) > time.time():
+        return False
+    return True
+
+
+def _rate_fail(ip: str):
+    now = time.time()
+    rec = _FAILS.setdefault(ip, {"n": 0, "first": now, "until": 0})
+    if now - rec["first"] > _FAIL_WINDOW:
+        rec["n"], rec["first"] = 0, now
+    rec["n"] += 1
+    if rec["n"] >= _FAIL_LIMIT:
+        rec["until"] = now + _BLOCK_TIME
+        rec["n"] = 0
+
+
+def auth(request: Request, x_token: str = Header(None), t: str = Query(None)):
     """Terima token panjang (YTM_TOKEN) atau PIN pendek (YTM_PIN) - PIN untuk diketik di HP."""
+    ip = (request.client.host if request.client else "?") or "?"
+    if not _rate_check(ip):
+        raise HTTPException(429, "Terlalu banyak percobaan, coba lagi 10 menit")
     given = x_token or t or ""
     if _same(given, config.TOKEN) or _same(given, config.PIN):
+        _FAILS.pop(ip, None)
         return
+    _rate_fail(ip)
     raise HTTPException(401, "Token/PIN salah")
 
 
@@ -65,6 +97,13 @@ def home():
 @app.get("/search")
 def search(q: str, type: str = "songs"):
     return {"items": call(catalog.search, q, type)}
+
+
+@app.get("/auth-status")
+def auth_status():
+    """Status login yang jujur: file ada, dan sesinya masih hidup atau sudah dibatalkan Google."""
+    ok = catalog.authed()
+    return {"authed": ok, "logged_in": catalog.session_alive() if ok else False}
 
 
 @app.get("/library")
@@ -211,7 +250,7 @@ SETUP_HTML = """<!doctype html><html><head><meta charset="utf-8">
 <li>Tekan <b>F12</b> &rarr; tab <b>Network</b> &rarr; pilih filter <b>Fetch/XHR</b>.</li>
 <li>Tekan <b>F5</b>, lalu klik request bernama <b>browse</b> atau <b>account_menu</b>.</li>
 <li>Panel kanan: tab <b>Headers</b> &rarr; <b>Request Headers</b> &rarr; klik kanan &rarr; <b>Copy request headers</b>.</li>
-<li>Pastikan blok itu memuat baris <code>Authorization: SAPISIDHASH ...</code> dan <code>Cookie: ... SID=...</code>.</li>
+<li>Pastikan blok itu memuat baris <code>Authorization: SAPISIDHASH *** dan <code>Cookie: ... SID=...</code>.</li>
 </ol>
 <h2>2. Tempel di sini</h2>
 <textarea id="h" placeholder="cookie: HSID=...; SSID=...; SID=...&#10;user-agent: Mozilla/5.0 ...&#10;x-goog-authuser: 0"></textarea>
@@ -246,7 +285,7 @@ SAPISID_RE = re.compile(r"(?:__Secure-3PAPISID|SAPISID|__Secure-1PAPISID)=([^;\s
 
 
 def _authorization(raw: str) -> str:
-    """Header Authorization: SAPISIDHASH yang dipakai ytmusicapi untuk mendeteksi login.
+    """Header Authorization: SAPISIDHASH *** dipakai ytmusicapi untuk mendeteksi login.
 
     Request dokumen (GET /) tidak membawa header ini, jadi dihitung sendiri dari cookie:
     sha1("<ts> <sapisid> https://music.youtube.com").

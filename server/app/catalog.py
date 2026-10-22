@@ -128,8 +128,29 @@ def _artist_tracks(d):
     return tracks
 
 
+def session_alive():
+    """Cek apakah cookie di browser.json masih sesi aktif (Google sering membatalkannya)."""
+    try:
+        import json as _json
+        import httpx
+        h = _json.load(open(config.AUTH_FILE, encoding="utf-8"))
+        r = httpx.get("https://music.youtube.com/", timeout=20, follow_redirects=True,
+                      headers={"Cookie": h.get("cookie", ""),
+                               "User-Agent": h.get("user-agent", "Mozilla/5.0"),
+                               "Accept-Language": "en-US,en;q=0.9"})
+        return '"LOGGED_IN": true' in r.text
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def detail(kind, iid):
-    if kind == "album":
+    if kind == "playlist" and iid in ("LM", "VLLM"):
+        # "Lagu yang disukai" bukan playlist biasa - harus lewat get_liked_songs.
+        d = yt().get_liked_songs(limit=300)
+        tracks = d.get("tracks") or []
+        d["title"] = "Lagu yang disukai"
+        sub = "Playlist"
+    elif kind == "album":
         d = yt().get_album(iid)
         tracks = d.get("tracks") or []
         year = d.get("year")

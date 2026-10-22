@@ -5,7 +5,6 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
-import android.content.ComponentName;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
@@ -14,7 +13,6 @@ import android.os.IBinder;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
-import androidx.media.session.MediaButtonReceiver;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -50,17 +48,17 @@ public class PlaybackService extends Service implements Playback.Listener {
             nm.createNotificationChannel(
                     new NotificationChannel(CH, "Pemutaran", NotificationManager.IMPORTANCE_LOW));
         }
-        // Di API < 21 MediaSessionCompat mensyaratkan komponen MediaButtonReceiver.
-        // Tanpa itu: IllegalArgumentException "MediaButtonReceiver component may not be null".
-        try {
-            session = new MediaSessionCompat(this, "ytm",
-                    new ComponentName(this, MediaButtonReceiver.class), null);
-        } catch (Throwable t1) {
+        // API < 21 (KitKat): MediaSessionCompat menuntut MediaButtonReceiver, dan receiver itu
+        // butuh Service ber-intent-filter MEDIA_BUTTON -> kalau tidak ada, sistem crash.
+        // Di KitKat kontrol lockscreen datang dari aksi notifikasi, jadi session tidak diperlukan.
+        if (Build.VERSION.SDK_INT >= 21) {
             try {
                 session = new MediaSessionCompat(this, "ytm");
-            } catch (Throwable t2) {
-                session = null;   // tetap jalan tanpa media session (notifikasi biasa)
+            } catch (Throwable t) {
+                session = null;
             }
+        } else {
+            session = null;
         }
         if (session != null) {
             session.setCallback(new MediaSessionCompat.Callback() {
