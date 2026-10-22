@@ -115,6 +115,8 @@ public final class Playback {
     }
 
     private void onTrack() {
+        Item cur = current();
+        if (cur != null) Api.reportHistory(app, cur);
         fire();
         int n = player.getNextMediaItemIndex();
         if (n != C.INDEX_UNSET) Api.prefetch(app, player.getMediaItemAt(n).mediaId);

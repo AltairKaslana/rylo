@@ -41,6 +41,7 @@ public final class Api {
     public static class Detail { public String kind, id, title, subtitle, thumb; public List<Item> tracks; }
     public static class Lyrics { public String lyrics; }
     public static class Suggest { public java.util.List<String> items; }
+    public static class Ok { public boolean ok; public boolean fav; }
 
     private static final OkHttpClient HTTP = buildClient();
 
@@ -167,6 +168,126 @@ public final class Api {
     /** Saran pencarian saat mengetik. */
     public static void suggest(Context c, String q, Cb<Suggest> cb) {
         get(c, "/suggest?q=" + enc(q), 300000, Suggest.class, cb);
+    }
+
+
+    /** POST/PATCH/DELETE dengan body JSON; hasil diabaikan kalau tidak perlu. */
+    public static void send(Context c, String method, String path, String json, final Cb<Ok> cb) {
+        final Context app = c.getApplicationContext();
+        if (!Prefs.ready(app)) { cb.err("Server belum diatur"); return; }
+        okhttp3.RequestBody body = okhttp3.RequestBody.create(
+                okhttp3.MediaType.parse("application/json; charset=utf-8"), json == null ? "{}" : json);
+        Request.Builder rb;
+        try {
+            rb = new Request.Builder().url(Prefs.server(app) + path)
+                    .header("X-Token", Prefs.token(app));
+        } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
+        if ("DELETE".equals(method)) rb.delete(body);
+        else if ("PATCH".equals(method)) rb.patch(body);
+        else rb.post(body);
+        HTTP.newCall(rb.build()).enqueue(new Callback() {
+            @Override public void onFailure(Call call, IOException e) {
+                final String why = Log2.write(app, method + " " + path, e);
+                UI.post(() -> cb.err(why));
+            }
+            @Override public void onResponse(Call call, Response resp) {
+                try { resp.body().string(); } catch (Exception ignored) { }
+                final int code = resp.code();
+                resp.close();
+                UI.post(() -> {
+                    if (code >= 200 && code < 300) {
+                        Ok o = new Ok(); o.ok = true; o.fav = true; cb.ok(o);
+                    } else {
+                        cb.err("Server " + code);
+                    }
+                });
+            }
+        });
+    }
+
+    private static String json(Item it) {
+        JsonObject o = new JsonObject();
+        o.addProperty("videoId", it.id);
+        o.addProperty("title", it.title);
+        o.addProperty("subtitle", it.subtitle);
+        o.addProperty("thumb", it.thumb);
+        o.addProperty("dur", it.dur);
+        return o.toString();
+    }
+
+    // ---- koleksi lokal ----
+    public static void favs(Context c, Cb<Items> cb) { get(c, "/lib/favorites", 0, Items.class, cb); }
+
+    public static void history(Context c, Cb<Items> cb) { get(c, "/lib/history", 0, Items.class, cb); }
+
+    public static void playlists(Context c, Cb<Items> cb) { get(c, "/lib/playlists", 0, Items.class, cb); }
+
+    public static void playlistTracks(Context c, String id, Cb<Detail> cb) {
+        get(c, "/lib/playlists/" + id, 0, Detail.class, cb);
+    }
+
+    public static void favAdd(Context c, Item it, Cb<Ok> cb) {
+        send(c, "POST", "/lib/fav", json(it), cb);
+    }
+
+    public static void favRemove(Context c, String id, Cb<Ok> cb) {
+        send(c, "DELETE", "/lib/fav/" + id, "{}", cb);
+    }
+
+    public static void createPlaylist(Context c, String name, final Cb<Item> cb) {
+        final Context app = c.getApplicationContext();
+        JsonObject o = new JsonObject();
+        o.addProperty("name", name);
+        okhttp3.RequestBody body = okhttp3.RequestBody.create(
+                okhttp3.MediaType.parse("application/json; charset=utf-8"), o.toString());
+        Request req;
+        try {
+            req = new Request.Builder().url(Prefs.server(app) + "/lib/playlists")
+                    .header("X-Token", Prefs.token(app)).post(body).build();
+        } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
+        HTTP.newCall(req).enqueue(new Callback() {
+            @Override public void onFailure(Call call, IOException e) {
+                final String why = Log2.write(app, "createPlaylist", e);
+                UI.post(() -> cb.err(why));
+            }
+            @Override public void onResponse(Call call, Response resp) {
+                String text = "";
+                try { text = resp.body().string(); } catch (Exception ignored) { }
+                final int code = resp.code();
+                resp.close();
+                if (code >= 200 && code < 300) {
+                    final Item it = GSON.fromJson(text, Item.class);
+                    UI.post(() -> cb.ok(it));
+                } else {
+                    UI.post(() -> cb.err("Server " + code));
+                }
+            }
+        });
+    }
+
+    public static void renamePlaylist(Context c, String pid, String name, Cb<Ok> cb) {
+        JsonObject o = new JsonObject();
+        o.addProperty("name", name);
+        send(c, "PATCH", "/lib/playlists/" + pid, o.toString(), cb);
+    }
+
+    public static void deletePlaylist(Context c, String pid, Cb<Ok> cb) {
+        send(c, "DELETE", "/lib/playlists/" + pid, "{}", cb);
+    }
+
+    public static void addToPlaylist(Context c, String pid, Item it, Cb<Ok> cb) {
+        send(c, "POST", "/lib/playlists/" + pid + "/items", json(it), cb);
+    }
+
+    public static void removeFromPlaylist(Context c, String pid, String vid, Cb<Ok> cb) {
+        send(c, "DELETE", "/lib/playlists/" + pid + "/items/" + vid, "{}", cb);
+    }
+
+    public static void reportHistory(Context c, Item it) {
+        send(c, "POST", "/lib/history", json(it), new Cb<Ok>() {
+            @Override public void ok(Ok r) { }
+            @Override public void err(String m) { }
+        });
     }
 
     public static void home(Context c, Cb<Home> cb) { get(c, "/home", 300000, Home.class, cb); }

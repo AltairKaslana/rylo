@@ -19,6 +19,9 @@ public final class Adapters {
     /** it = item yang diketuk, ctx = daftar tempat item itu berada (untuk membentuk antrean). */
     public interface OnPick { void pick(Item it, List<Item> ctx); }
 
+    /** Tekan lama pada baris (menu favorit / playlist). */
+    public interface OnLongPick { void longPick(Item it, List<Item> ctx); }
+
     private static int radius(Item it) { return "artist".equals(it.kind) ? 999 : 4; }
 
     // ---------- Baris vertikal (hasil cari, isi playlist, library) ----------
@@ -36,9 +39,12 @@ public final class Adapters {
     public static class Rows extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         private final List<Item> data = new ArrayList<>();
         private final OnPick cb;
+        private OnLongPick longCb;
         private View header;
 
         public Rows(OnPick cb) { this.cb = cb; }
+
+        public void setLongPick(OnLongPick l) { this.longCb = l; }
 
         public void set(List<Item> items) {
             data.clear();
@@ -72,6 +78,9 @@ public final class Adapters {
             v.dur.setText(it.isSong() && it.dur > 0 ? Ui.fmt(it.dur * 1000L) : "");
             Api.thumb(v.cover, it.thumb, Ui.dp(v.cover.getContext(), 48), radius(it) == 999 ? 24 : 4);
             v.itemView.setOnClickListener(x -> cb.pick(it, data));
+            if (longCb != null) {
+                v.itemView.setOnLongClickListener(x -> { longCb.longPick(it, data); return true; });
+            }
         }
     }
 
@@ -87,9 +96,13 @@ public final class Adapters {
     }
 
     public static class Cards extends RecyclerView.Adapter<CardVH> {
-        private final List<Item> data; private final OnPick cb;
+        private final List<Item> data; private final OnPick cb; private final OnLongPick longCb;
 
-        public Cards(List<Item> data, OnPick cb) { this.data = data; this.cb = cb; }
+        public Cards(List<Item> data, OnPick cb) { this(data, cb, null); }
+
+        public Cards(List<Item> data, OnPick cb, OnLongPick longCb) {
+            this.data = data; this.cb = cb; this.longCb = longCb;
+        }
 
         @Override public int getItemCount() { return data.size(); }
 
@@ -103,6 +116,9 @@ public final class Adapters {
             h.sub.setText(it.subtitle);
             Api.thumb(h.cover, it.thumb, Ui.dp(h.cover.getContext(), 140), "artist".equals(it.kind) ? 70 : 6);
             h.itemView.setOnClickListener(x -> cb.pick(it, data));
+            if (longCb != null) {
+                h.itemView.setOnLongClickListener(x -> { longCb.longPick(it, data); return true; });
+            }
         }
     }
 
@@ -119,8 +135,11 @@ public final class Adapters {
     public static class Sections extends RecyclerView.Adapter<SecVH> {
         private final List<Api.Section> data; private final OnPick cb;
         private final RecyclerView.RecycledViewPool pool = new RecyclerView.RecycledViewPool();
+        private OnLongPick longCb;
 
         public Sections(List<Api.Section> data, OnPick cb) { this.data = data; this.cb = cb; }
+
+        public void setLongPick(OnLongPick l) { this.longCb = l; }
 
         @Override public int getItemCount() { return data.size(); }
 
@@ -134,7 +153,7 @@ public final class Adapters {
         @Override public void onBindViewHolder(@NonNull SecVH h, int p) {
             Api.Section s = data.get(p);
             h.title.setText(s.title);
-            h.rv.setAdapter(new Cards(s.items, cb));
+            h.rv.setAdapter(new Cards(s.items, cb, longCb));
         }
     }
 

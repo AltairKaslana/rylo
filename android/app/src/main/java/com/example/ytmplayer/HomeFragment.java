@@ -12,7 +12,9 @@ public class HomeFragment extends BaseFragment {
                 if (!isAdded()) return;
                 busy(false);
                 if (r.sections == null || r.sections.isEmpty()) { message("Beranda kosong"); return; }
-                list.setAdapter(new Adapters.Sections(r.sections, (it, ctx) -> main().open(it, ctx)));
+                Adapters.Sections a = new Adapters.Sections(r.sections, (it, ctx) -> main().open(it, ctx));
+                a.setLongPick((it, ctx) -> main().trackMenu(it, "", "", null));
+                list.setAdapter(a);
             }
 
             @Override public void err(String m) { if (isAdded()) fail(m, HomeFragment.this::load); }

@@ -15,6 +15,9 @@ from PIL import Image, ImageOps
 from starlette.background import BackgroundTask
 
 from . import catalog, config, resolver
+from . import library as lib
+
+lib.init()
 
 if not config.TOKEN:
     raise RuntimeError("Environment variable YTM_TOKEN belum diisi")
@@ -364,3 +367,148 @@ async def setup_save(request: Request):
         pass
     catalog.reset()
     return {"ok": True, "authed": catalog.authed()}
+
+# ---------------- koleksi lokal (tanpa akun YouTube) ----------------
+
+@app.get("/lib/stats")
+def lib_stats():
+    return lib.stats()
+
+
+@app.get("/lib/favorites")
+def lib_favs():
+    return {"items": lib.favs()}
+
+
+@app.get("/lib/fav/{vid}")
+def lib_fav_status(vid: str):
+    check_vid(vid)
+    return {"fav": lib.fav_has(vid)}
+
+
+@app.post("/lib/fav")
+async def lib_fav_add(request: Request):
+    body = await _json(request)
+    if not lib.fav_add(body):
+        raise HTTPException(400, "videoId wajib")
+    return {"ok": True, "fav": True}
+
+
+@app.delete("/lib/fav/{vid}")
+def lib_fav_del(vid: str):
+    check_vid(vid)
+    lib.fav_remove(vid)
+    return {"ok": True, "fav": False}
+
+
+@app.get("/lib/history")
+def lib_history(limit: int = 100):
+    return {"items": lib.history(limit)}
+
+
+@app.post("/lib/history")
+async def lib_history_add(request: Request):
+    body = await _json(request)
+    if not lib.history_add(body):
+        raise HTTPException(400, "videoId wajib")
+    return {"ok": True}
+
+
+@app.delete("/lib/history")
+def lib_history_clear():
+    lib.history_clear()
+    return {"ok": True}
+
+
+@app.get("/lib/playlists")
+def lib_playlists():
+    return {"items": lib.playlists()}
+
+
+@app.post("/lib/playlists")
+async def lib_playlist_create(request: Request):
+    body = await _json(request)
+    pl = lib.playlist_create(body.get("name"))
+    if not pl:
+        raise HTTPException(400, "nama playlist kosong")
+    return pl
+
+
+@app.patch("/lib/playlists/{pid}")
+async def lib_playlist_rename(pid: int, request: Request):
+    body = await _json(request)
+    if not lib.playlist_rename(pid, body.get("name")):
+        raise HTTPException(400, "nama playlist kosong")
+    return {"ok": True}
+
+
+@app.delete("/lib/playlists/{pid}")
+def lib_playlist_delete(pid: int):
+    lib.playlist_delete(pid)
+    return {"ok": True}
+
+
+@app.get("/lib/playlists/{pid}")
+def lib_playlist_items(pid: int):
+    name = None
+    for p in lib.playlists():
+        if p["id"] == str(pid):
+            name = p["title"]
+            break
+    return {"kind": "playlist", "id": str(pid), "title": name or "Playlist",
+            "subtitle": "lokal", "thumb": "", "tracks": lib.playlist_items(pid)}
+
+
+@app.post("/lib/playlists/{pid}/items")
+async def lib_playlist_add(pid: int, request: Request):
+    body = await _json(request)
+    if not lib.playlist_add(pid, body):
+        raise HTTPException(400, "videoId wajib")
+    return {"ok": True}
+
+
+@app.delete("/lib/playlists/{pid}/items/{vid}")
+def lib_playlist_remove(pid: int, vid: str):
+    check_vid(vid)
+    lib.playlist_remove(pid, vid)
+    return {"ok": True}
+
+
+@app.get("/lib/search")
+def lib_search(q: str):
+    return {"items": lib.search(q)}
+
+
+@app.post("/lib/import")
+def lib_import():
+    """Impor playlist dari akun YouTube (butuh login). Sekali pakai, hasilnya jadi playlist lokal."""
+    if not catalog.authed():
+        raise HTTPException(403, "Perlu login YouTube untuk impor")
+    created = []
+    for src in call(catalog.library):
+        if not str(src.get("id", "")).startswith(("PL", "LM", "VL")):
+            continue
+        try:
+            d = catalog.detail("playlist", src["id"])
+        except Exception:  # noqa: BLE001
+            continue
+        pl = lib.playlist_create(src.get("title") or "Impor")
+        n = 0
+        for t in d.get("tracks") or []:
+            if lib.playlist_add(pl["id"], {"videoId": t["id"], "title": t.get("title"),
+                                               "subtitle": t.get("subtitle"),
+                                               "thumb": t.get("thumb"), "dur": t.get("dur")}):
+                n += 1
+        created.append({"name": pl["title"], "tracks": n})
+    return {"ok": True, "playlists": created}
+
+
+async def _json(request: Request):
+    try:
+        raw = await request.body()
+        if not raw:
+            return {}
+        import json as _json_mod
+        return _json_mod.loads(raw.decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        raise HTTPException(400, "body JSON tidak valid")

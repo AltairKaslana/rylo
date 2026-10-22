@@ -31,6 +31,7 @@ public class SearchFragment extends BaseFragment {
         }
         paint();
         rows = new Adapters.Rows((it, ctx) -> main().open(it, ctx));
+        rows.setLongPick((it, ctx) -> main().trackMenu(it, "", "", null));
         list.setAdapter(rows);
         q.setOnEditorActionListener((tv, action, ev) -> {
             if (action == EditorInfo.IME_ACTION_SEARCH) { cancel(); run(); return true; }

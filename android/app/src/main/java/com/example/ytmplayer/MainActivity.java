@@ -175,7 +175,78 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
                 .show();
     }
 
-    private void toast(String m) {
+    /** Menu tekan-lama pada lagu: favorit & playlist. */
+    public void trackMenu(final Item it, final String mode, final String pid, final Runnable after) {
+        final boolean inPl = "pl".equals(mode);
+        final String[] ops = inPl
+                ? new String[]{"Tambah ke favorit", "Tambah ke playlist lain", "Hapus dari playlist ini"}
+                : new String[]{"Tambah ke favorit", "Tambah ke playlist"};
+        new AlertDialog.Builder(this, R.style.DialogTheme)
+                .setTitle(it.title)
+                .setItems(ops, (d, i) -> {
+                    if (i == 0) {
+                        Api.favAdd(this, it, new Api.Cb<Api.Ok>() {
+                            @Override public void ok(Api.Ok r) { toast("Ditambahkan ke favorit"); if (after != null) after.run(); }
+                            @Override public void err(String m) { toast(m); }
+                        });
+                    } else if (i == 1) {
+                        pickPlaylist(it, after);
+                    } else {
+                        Api.removeFromPlaylist(this, pid, it.id, new Api.Cb<Api.Ok>() {
+                            @Override public void ok(Api.Ok r) { toast("Dihapus dari playlist"); if (after != null) after.run(); }
+                            @Override public void err(String m) { toast(m); }
+                        });
+                    }
+                })
+                .show();
+    }
+
+    private void pickPlaylist(final Item it, final Runnable after) {
+        Api.playlists(this, new Api.Cb<Api.Items>() {
+            @Override public void ok(Api.Items r) {
+                final List<Item> pls = r.items != null ? r.items : java.util.Collections.<Item>emptyList();
+                final String[] names = new String[pls.size() + 1];
+                names[0] = "+ Buat playlist baru";
+                for (int i = 0; i < pls.size(); i++) names[i + 1] = pls.get(i).title;
+                new AlertDialog.Builder(MainActivity.this, R.style.DialogTheme)
+                        .setTitle("Simpan ke playlist")
+                        .setItems(names, (d, i) -> {
+                            if (i == 0) newPlaylistWith(it, after);
+                            else addTo(pls.get(i - 1).id, it, after);
+                        })
+                        .show();
+            }
+
+            @Override public void err(String m) { toast(m); }
+        });
+    }
+
+    private void newPlaylistWith(final Item it, final Runnable after) {
+        final EditText e = new EditText(this);
+        e.setHint("Nama playlist");
+        new AlertDialog.Builder(this, R.style.DialogTheme)
+                .setTitle("Playlist baru")
+                .setView(e)
+                .setPositiveButton("Buat & simpan", (d, w) -> {
+                    String name = e.getText().toString().trim();
+                    if (name.isEmpty()) return;
+                    Api.createPlaylist(this, name, new Api.Cb<Item>() {
+                        @Override public void ok(Item pl) { addTo(pl.id, it, after); }
+                        @Override public void err(String m) { toast(m); }
+                    });
+                })
+                .setNegativeButton("Batal", null)
+                .show();
+    }
+
+    private void addTo(String pid, Item it, final Runnable after) {
+        Api.addToPlaylist(this, pid, it, new Api.Cb<Api.Ok>() {
+            @Override public void ok(Api.Ok r) { toast("Disimpan ke playlist"); if (after != null) after.run(); }
+            @Override public void err(String m) { toast(m); }
+        });
+    }
+
+    public void toast(String m) {
         android.widget.Toast.makeText(this, m, android.widget.Toast.LENGTH_SHORT).show();
     }
 
