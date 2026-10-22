@@ -1,0 +1,16 @@
+[Unit]
+Description=YTM Relay (server streaming untuk HP KitKat)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ytm
+WorkingDirectory=/opt/ytm-relay
+Environment=YTM_TOKEN=GANTI_DENGAN_TOKEN_PANJANG_ACAK
+Environment=YTM_AUTH=/opt/ytm-relay/browser.json
+ExecStart=/opt/ytm-relay/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

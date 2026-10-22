@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@color/bg"
+    android:paddingBottom="16dp" android:paddingLeft="24dp" android:paddingRight="24dp">
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="56dp"
+        android:gravity="center_vertical" android:orientation="horizontal">
+        <ImageView android:id="@+id/p_down" android:layout_width="48dp" android:layout_height="48dp"
+            android:padding="10dp" android:contentDescription="Tutup"
+            android:background="?attr/selectableItemBackground" app:srcCompat="@drawable/ic_down"/>
+        <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1"/>
+        <ImageView android:id="@+id/p_lyrics" android:layout_width="48dp" android:layout_height="48dp"
+            android:padding="12dp" android:contentDescription="Lirik"
+            android:background="?attr/selectableItemBackground" app:srcCompat="@drawable/ic_lyrics"/>
+        <ImageView android:id="@+id/p_queue" android:layout_width="48dp" android:layout_height="48dp"
+            android:padding="12dp" android:contentDescription="Antrean"
+            android:background="?attr/selectableItemBackground" app:srcCompat="@drawable/ic_queue"/>
+    </LinearLayout>
+
+    <FrameLayout android:id="@+id/art_box" android:layout_width="match_parent"
+        android:layout_height="300dp">
+        <ImageView android:id="@+id/p_cover" android:layout_width="match_parent"
+            android:layout_height="match_parent" android:scaleType="centerCrop"/>
+        <ScrollView android:id="@+id/lyrics_scroll" android:layout_width="match_parent"
+            android:layout_height="match_parent" android:background="#F0121212"
+            android:padding="16dp" android:visibility="gone">
+            <TextView android:id="@+id/lyrics_text" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:lineSpacingExtra="4dp"
+                android:textColor="#FFFFFF" android:textSize="16sp"/>
+        </ScrollView>
+    </FrameLayout>
+
+    <TextView android:id="@+id/p_title" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginTop="20dp"
+        android:ellipsize="end" android:singleLine="true" android:textColor="#FFFFFF"
+        android:textSize="22sp" android:textStyle="bold"/>
+    <TextView android:id="@+id/p_artist" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:ellipsize="end" android:singleLine="true"
+        android:textColor="#AAAAAA" android:textSize="15sp"/>
+
+    <View android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"/>
+
+    <SeekBar android:id="@+id/p_seek" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:max="1000"
+        android:maxHeight="3dp" android:minHeight="3dp"
+        android:paddingLeft="8dp" android:paddingRight="8dp"
+        android:progressDrawable="@drawable/seek_progress" android:thumb="@drawable/seek_thumb"/>
+    <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+        <TextView android:id="@+id/p_pos" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="0:00" android:textColor="#AAAAAA"
+            android:textSize="12sp"/>
+        <TextView android:id="@+id/p_dur" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:layout_alignParentRight="true"
+            android:text="0:00" android:textColor="#AAAAAA" android:textSize="12sp"/>
+    </RelativeLayout>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:gravity="center" android:orientation="horizontal">
+        <ImageView android:id="@+id/p_shuffle" android:layout_width="48dp" android:layout_height="48dp"
+            android:padding="12dp" android:contentDescription="Acak" app:srcCompat="@drawable/ic_shuffle"/>
+        <ImageView android:id="@+id/p_prev" android:layout_width="56dp" android:layout_height="56dp"
+            android:padding="12dp" android:contentDescription="Sebelumnya" app:srcCompat="@drawable/ic_prev"/>
+        <ImageView android:id="@+id/p_play" android:layout_width="72dp" android:layout_height="72dp"
+            android:layout_marginLeft="8dp" android:layout_marginRight="8dp"
+            android:background="@drawable/bg_play_circle" android:padding="18dp"
+            android:contentDescription="Putar/Jeda" app:srcCompat="@drawable/ic_play" app:tint="#000000"/>
+        <ImageView android:id="@+id/p_next" android:layout_width="56dp" android:layout_height="56dp"
+            android:padding="12dp" android:contentDescription="Berikutnya" app:srcCompat="@drawable/ic_next"/>
+        <ImageView android:id="@+id/p_repeat" android:layout_width="48dp" android:layout_height="48dp"
+            android:padding="12dp" android:contentDescription="Ulang" app:srcCompat="@drawable/ic_repeat"/>
+    </LinearLayout>
+</LinearLayout>

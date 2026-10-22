@@ -1,0 +1,15 @@
+.gradle/
+build/
+*.iml
+local.properties
+.idea/
+server/browser.json
+server/cookies.txt
+server/cache/
+venv/
+__pycache__/
+
+# build artifacts
+android/.gradle/
+android/app/build/
+.gradle/

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical">
+    <EditText android:id="@+id/q" android:layout_width="match_parent"
+        android:layout_height="44dp" android:layout_margin="12dp"
+        android:background="@drawable/bg_search" android:hint="Cari lagu, album, artis"
+        android:imeOptions="actionSearch" android:inputType="text" android:singleLine="true"
+        android:paddingLeft="16dp" android:paddingRight="16dp"
+        android:textColor="#FFFFFF" android:textSize="15sp"/>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:paddingLeft="12dp" android:paddingBottom="8dp">
+        <TextView android:id="@+id/chip0" style="@style/Chip" android:text="Lagu"/>
+        <TextView android:id="@+id/chip1" style="@style/Chip" android:text="Album"/>
+        <TextView android:id="@+id/chip2" style="@style/Chip" android:text="Artis"/>
+        <TextView android:id="@+id/chip3" style="@style/Chip" android:text="Playlist"/>
+    </LinearLayout>
+    <include layout="@layout/fragment_list" android:layout_width="match_parent"
+        android:layout_height="0dp" android:layout_weight="1"/>
+</LinearLayout>
