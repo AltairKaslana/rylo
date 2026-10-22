@@ -104,7 +104,7 @@ public final class Api {
         }
         HTTP.newCall(req).enqueue(new Callback() {
             @Override public void onFailure(Call call, IOException e) {
-                final String why = Log2.write(app, "PING " + Prefs.server(app), e);
+                final String why = Log2.write(app, "GET " + url, e);
                 UI.post(() -> cb.err("Gagal: " + why));
             }
 
@@ -148,8 +148,8 @@ public final class Api {
         } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
         HTTP.newCall(req).enqueue(new Callback() {
             @Override public void onFailure(Call call, IOException e) {
-                final String why = Log2.write(app, "GET " + url, e);
-                UI.post(() -> cb.err("Tidak bisa terhubung: " + why));
+                final String why = Log2.write(app, "PING " + Prefs.server(app), e);
+                UI.post(() -> cb.err("Gagal: " + why));
             }
             @Override public void onResponse(Call call, Response resp) {
                 final int code = resp.code();
