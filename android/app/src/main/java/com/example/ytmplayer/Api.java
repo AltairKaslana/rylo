@@ -189,14 +189,6 @@ public final class Api {
         return srv;
     }
 
-    public static String hostOf(String url) {
-        try {
-            return java.net.URI.create(url).getHost();
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
     public static String stream(Context c, String id) {
         return base(c) + "/stream/" + id + "?t=" + enc(Prefs.token(c));
     }
