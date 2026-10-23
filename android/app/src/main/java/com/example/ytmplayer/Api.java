@@ -148,10 +148,28 @@ public final class Api {
         });
     }
 
-    /** Satu entri pencarian terakhir. */
+    /** Satu entri pencarian terakhir (termasuk lagu yang dipilih pengguna). */
     public static class Recent {
         public String query, kind;
         public long at;
+        public String video_id, title, subtitle, thumb;
+        public int dur;
+
+        /** True kalau ada lagu tersimpan -> bisa langsung diputar. */
+        public boolean hasTrack() {
+            return video_id != null && !video_id.isEmpty();
+        }
+
+        /** Jadikan Item supaya bisa langsung diputar. */
+        public Item toItem() {
+            Item it = new Item();
+            it.id = video_id;
+            it.title = title != null ? title : query;
+            it.subtitle = subtitle != null ? subtitle : "";
+            it.thumb = thumb;
+            it.dur = dur;
+            return it;
+        }
     }
 
     public static class Recents {
@@ -163,12 +181,19 @@ public final class Api {
         get(c, "/lib/recent-searches?limit=12", 0, Recents.class, cb);
     }
 
-    /** Simpan pencarian (biar muncul sebagai rekomendasi nanti). WAJIB POST. */
-    public static void rememberSearch(Context c, String q, String kind) {
+    /** Simpan pencarian + lagu yang dipilih pengguna (WAJIB POST). */
+    public static void rememberSearch(Context c, String q, String kind, Item it) {
         if (q == null || q.trim().isEmpty()) return;
         JsonObject o = new JsonObject();
         o.addProperty("q", q);
         o.addProperty("kind", kind == null ? "songs" : kind);
+        if (it != null) {
+            o.addProperty("video_id", it.id);
+            o.addProperty("title", it.title);
+            o.addProperty("subtitle", it.subtitle);
+            o.addProperty("thumb", it.thumb);
+            o.addProperty("dur", it.dur);
+        }
         send(c, "POST", "/lib/recent-searches", o.toString(),
                 new Cb<Ok>() {
                     @Override public void ok(Ok r) { }

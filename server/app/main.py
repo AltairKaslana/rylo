@@ -507,7 +507,9 @@ async def remember_search(request: Request, profile: str = Depends(prof)):
     q = (body.get("q") or "").strip()
     if not q:
         raise HTTPException(400, "q wajib")
-    lib.search_add(profile, q, body.get("kind") or "songs")
+    # lagu yang dipilih pengguna (opsional) - supaya bisa langsung diputar lagi
+    item = {k: body.get(k) for k in ("video_id", "title", "subtitle", "thumb", "dur")}
+    lib.search_add(profile, q, body.get("kind") or "songs", item)
     return {"ok": True}
 
 

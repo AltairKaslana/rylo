@@ -49,7 +49,11 @@ public class Adapters_Recent {
         @Override public void onBindViewHolder(@NonNull VH h, int p) {
             final Api.Recent r = data.get(p);
             h.title.setText(r.query);
-            h.meta.setText(relatif(r.at));
+            // kalau ada lagu tersimpan, tunjukukkan itu (yang akan langsung diputar)
+            String meta = r.hasTrack() && r.title != null && !r.title.isEmpty()
+                    ? r.title + (r.subtitle != null && !r.subtitle.isEmpty() ? " • " + r.subtitle : "")
+                    : relatif(r.at);
+            h.meta.setText(meta);
             h.itemView.setOnClickListener(x -> pick.pick(r));
             h.del.setOnClickListener(x -> drop.drop(r));
         }

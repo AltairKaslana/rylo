@@ -43,8 +43,14 @@ public class SearchFragment extends BaseFragment {
         recentList = v.findViewById(R.id.recentList);
         recentList.setLayoutManager(new LinearLayoutManager(requireContext()));
         recentAdapter = new Adapters_Recent.RecentAdapter(recentData,
-                r -> {                       // ketuk -> cari lagi
-                    q.setText(r.query);
+                r -> {                       // ketuk -> langsung putar lagu pilihan
+                    if (r.hasTrack()) {
+                        java.util.List<Item> satu = new java.util.ArrayList<>();
+                        satu.add(r.toItem());
+                        main().open(satu.get(0), satu);
+                        return;
+                    }
+                    q.setText(r.query);          // belum ada lagu tersimpan -> cari lagi
                     q.setSelection(r.query.length());
                     run();
                 },
@@ -64,7 +70,11 @@ public class SearchFragment extends BaseFragment {
         });
 
         paint();
-        rows = new Adapters.Rows((it, ctx) -> main().open(it, ctx));
+        rows = new Adapters.Rows((it, ctx) -> {
+            // ingat lagu yang dipilih agar pencarian terakhir bisa langsung memutarnya
+            Api.rememberSearch(requireContext(), q.getText().toString().trim(), KINDS[sel], it);
+            main().open(it, ctx);
+        });
         rows.setLongPick((it, ctx) -> main().trackMenu(it, "", "", null));
         list.setAdapter(rows);
         q.setOnEditorActionListener((tv, action, ev) -> {
@@ -150,7 +160,7 @@ public class SearchFragment extends BaseFragment {
         final String s = q.getText().toString().trim();
         if (s.isEmpty()) { paintRecent(true); return; }
         cancel();
-        Api.rememberSearch(requireContext(), s, KINDS[sel]);   // jadikan rekomendasi nanti
+        Api.rememberSearch(requireContext(), s, KINDS[sel], null);   // pencarian tanpa lagu spesifik
         paintRecent(false);
         InputMethodManager imm = (InputMethodManager) requireContext().getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) imm.hideSoftInputFromWindow(q.getWindowToken(), 0);
