@@ -163,10 +163,13 @@ public final class Api {
         get(c, "/lib/recent-searches?limit=12", 0, Recents.class, cb);
     }
 
-    /** Simpan pencarian (biar muncul sebagai rekomendasi nanti). */
+    /** Simpan pencarian (biar muncul sebagai rekomendasi nanti). WAJIB POST. */
     public static void rememberSearch(Context c, String q, String kind) {
         if (q == null || q.trim().isEmpty()) return;
-        get(c, "/lib/recent-searches?q=" + enc(q) + "&kind=" + enc(kind), 0, Ok.class,
+        JsonObject o = new JsonObject();
+        o.addProperty("q", q);
+        o.addProperty("kind", kind == null ? "songs" : kind);
+        send(c, "POST", "/lib/recent-searches", o.toString(),
                 new Cb<Ok>() {
                     @Override public void ok(Ok r) { }
                     @Override public void err(String m) { }

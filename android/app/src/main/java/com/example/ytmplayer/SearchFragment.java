@@ -78,11 +78,13 @@ public class SearchFragment extends BaseFragment {
             @Override public void afterTextChanged(android.text.Editable e) {
                 final String text = e.toString().trim();
                 if (pending != null) h.removeCallbacks(pending);
-                paintRecent(text.isEmpty());
-                if (text.length() < 2) {
+                if (text.isEmpty()) {
                     lastSuggest = "";
+                    loadRecent();          // ambil data terbaru dari server
+                    paintRecent(true);
                     return;
                 }
+                paintRecent(false);
                 pending = new Runnable() {
                     @Override public void run() { suggest(text); }
                 };
