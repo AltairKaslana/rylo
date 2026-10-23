@@ -108,6 +108,17 @@ public final class Net {
                 factory = null;
             }
         }
+
+        // ExoPlayer dan Glide membuka koneksi sendiri lewat HttpURLConnection, bukan OkHttp kita.
+        // Tanpa ini audio & gambar akan gagal walau API JSON sudah jalan.
+        if (factory != null) {
+            try {
+                HttpsURLConnection.setDefaultSSLSocketFactory(factory);
+                HttpsURLConnection.setDefaultHostnameVerifier(pinnedVerifier());
+            } catch (Throwable t) {
+                lastError += " | default-ssl: " + t.getClass().getSimpleName();
+            }
+        }
     }
 
     /** Verifier: terima host apa pun ASALKAN sertifikatnya persis sertifikat relay kita. */

@@ -120,11 +120,18 @@ public final class Api {
     }
 
     /** Alamat audio. Kalau perangkat sudah pernah gagal TLS, langsung pakai jalur HTTP cadangan. */
-    public static String stream(Context c, String id) {
+    /** Base URL efektif: jalur TLS cadangan dipakai bila sudah pernah diperlukan. */
+    public static String base(Context c) {
         String srv = Prefs.server(c);
-        String plain = TLS_FALLBACK.get(java.net.URI.create(srv).getHost());
-        if (plain != null && Prefs.altTls(c)) srv = plain;
-        return srv + "/stream/" + id + "?t=" + enc(Prefs.token(c));
+        try {
+            String alt = TLS_FALLBACK.get(java.net.URI.create(srv).getHost());
+            if (alt != null && Prefs.altTls(c)) return alt;
+        } catch (Exception ignored) { }
+        return srv;
+    }
+
+    public static String stream(Context c, String id) {
+        return base(c) + "/stream/" + id + "?t=" + enc(Prefs.token(c));
     }
 
     public static String img(Context c, String url, int px) {
