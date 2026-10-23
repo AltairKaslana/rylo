@@ -44,62 +44,68 @@ public final class Net {
     public static synchronized void install(Context c) {
         if (factory != null) return;
 
-        // 1) Conscrypt: tumpukan TLS modern untuk perangkat lama (TLS 1.2 + ECDSA + root baru).
+        // Kumpulkan trust anchor tambahan (root publik modern + sertifikat relay sendiri).
+        X509TrustManager extraTm = null;
         try {
-            Class<?> pc = Class.forName("org.conscrypt.Platform");
-            java.lang.reflect.Method m = pc.getDeclaredMethod("setUseEngineSocket", boolean.class);
-            m.setAccessible(true);
-            try { m.invoke(null, false); } catch (Throwable ignored) { }
+            KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
+            ks.load(null, null);
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            int[] raws = {R.raw.isrg_x1, R.raw.isrg_x2, R.raw.gts_r1, R.raw.gts_r2, R.raw.ytm_server};
+            for (int raw : raws) {
+                InputStream in = c.getResources().openRawResource(raw);
+                int n = 0;
+                try {
+                    for (Certificate cert : cf.generateCertificates(in)) {
+                        ks.setCertificateEntry("ca" + raw + "_" + n, cert);
+                        n++;
+                    }
+                } finally {
+                    in.close();
+                }
+            }
+            TrustManagerFactory extra = TrustManagerFactory.getInstance(
+                    TrustManagerFactory.getDefaultAlgorithm());
+            extra.init(ks);
+            extraTm = firstX509(extra.getTrustManagers());
+        } catch (Throwable t) {
+            lastError = "keystore: " + t.getClass().getSimpleName();
+        }
+
+        X509TrustManager defaultTm = null;
+        try {
+            TrustManagerFactory def = TrustManagerFactory.getInstance(
+                    TrustManagerFactory.getDefaultAlgorithm());
+            def.init((KeyStore) null);
+            defaultTm = firstX509(def.getTrustManagers());
+        } catch (Throwable ignored) { }
+
+        trust = new Composite(defaultTm, extraTm);
+
+        // 1) Conscrypt: tumpukan TLS modern (TLS 1.2 + ECDSA) untuk Android lama.
+        try {
             java.security.Security.insertProviderAt(
                     (java.security.Provider) Class.forName("org.conscrypt.OpenSSLProvider")
                             .getDeclaredConstructor().newInstance(), 1);
             SSLContext cc = SSLContext.getInstance("TLS", "Conscrypt");
-            cc.init(null, null, null);
-            SSLSocketFactory base = cc.getSocketFactory();
-            factory = new Tls12(base);
-            provider = "Conscrypt " + (base.getClass().getName());
+            cc.init(null, new TrustManager[]{trust}, null);
+            factory = new Tls12(cc.getSocketFactory());
+            provider = "Conscrypt";
         } catch (Throwable t) {
-            lastError = "conscrypt: " + t.getClass().getSimpleName() + ": " + t.getMessage();
+            lastError += " | conscrypt: " + t.getClass().getSimpleName() + ": " + t.getMessage();
         }
 
-        // 2) Tambalan manual: trust anchor tambahan + paksa TLS 1.2 (kalau Conscrypt gagal)
+        // 2) Cadangan: TLS 1.2 dari tumpukan bawaan + trust tambahan.
         if (factory == null) {
             try {
-                KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
-                ks.load(null, null);
-                CertificateFactory cf = CertificateFactory.getInstance("X.509");
-                int[] raws = {R.raw.isrg_x1, R.raw.isrg_x2, R.raw.gts_r1, R.raw.gts_r2, R.raw.ytm_server};
-                for (int raw : raws) {
-                    InputStream in = c.getResources().openRawResource(raw);
-                    int i = 0;
-                    try {
-                        for (Certificate cert : cf.generateCertificates(in)) {
-                            ks.setCertificateEntry("ca" + raw + "_" + i, cert);
-                            i++;
-                        }
-                    } finally {
-                        in.close();
-                    }
-                }
-
-                TrustManagerFactory extra = TrustManagerFactory.getInstance(
-                        TrustManagerFactory.getDefaultAlgorithm());
-                extra.init(ks);
-                TrustManagerFactory def = TrustManagerFactory.getInstance(
-                        TrustManagerFactory.getDefaultAlgorithm());
-                def.init((KeyStore) null);
-
-                trust = new Composite(firstX509(def.getTrustManagers()), firstX509(extra.getTrustManagers()));
                 SSLContext ctx = SSLContext.getInstance("TLSv1.2");
                 ctx.init(null, new TrustManager[]{trust}, null);
                 factory = new Tls12(ctx.getSocketFactory());
-                provider = "manual TLSv1.2 + root tambahan";
-                HttpsURLConnection.setDefaultSSLSocketFactory(factory);
+                provider = "manual TLSv1.2";
+                try { HttpsURLConnection.setDefaultSSLSocketFactory(factory); } catch (Throwable ignored) { }
             } catch (Throwable t) {
                 lastError += " | manual: " + t.getClass().getSimpleName() + ": " + t.getMessage();
+                provider = "gagal";
                 factory = null;
-                trust = null;
-                provider = "gagal - pakai default sistem";
             }
         }
     }
@@ -174,14 +180,13 @@ public final class Net {
                     ssl.setEnabledProtocols(new String[]{"TLSv1.2"});
                 } catch (Throwable ignored) { }
                 try {
-                    // Funnel Tailscale memakai sertifikat ECDSA; KitKat kadang hanya menawarkan cipher RSA.
+                    // Aktifkan cipher modern (ECDSA & RSA). Bila tidak ada yang cocok, biarkan bawaan.
                     java.util.List<String> on = new java.util.ArrayList<String>();
                     for (String c : ssl.getSupportedCipherSuites()) {
-                        if (c.startsWith("TLS_ECDHE_ECDSA_") || c.startsWith("TLS_ECDHE_RSA_")) on.add(c);
+                        if (c.startsWith("TLS_ECDHE_ECDSA_") || c.startsWith("TLS_ECDHE_RSA_")
+                                || c.startsWith("TLS_AES_")) on.add(c);
                     }
-                    if (!on.isEmpty()) {
-                        ssl.setEnabledCipherSuites(on.toArray(new String[on.size()]));
-                    }
+                    if (!on.isEmpty()) ssl.setEnabledCipherSuites(on.toArray(new String[on.size()]));
                 } catch (Throwable ignored) { }
             }
             return s;
