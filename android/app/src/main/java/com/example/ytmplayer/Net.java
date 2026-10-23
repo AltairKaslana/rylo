@@ -40,7 +40,7 @@ public final class Net {
             KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
             ks.load(null, null);
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
-            int[] raws = {R.raw.isrg_x1, R.raw.isrg_x2};
+            int[] raws = {R.raw.isrg_x1, R.raw.isrg_x2, R.raw.gts_r1, R.raw.gts_r2};
             for (int raw : raws) {
                 InputStream in = c.getResources().openRawResource(raw);
                 int i = 0;
