@@ -46,10 +46,19 @@ public final class Api {
      * Jalur cadangan TLS: stunnel di box memakai sertifikat RSA sendiri (dipin di Net.java).
      * Dipakai bila HTTPS Cloudflare gagal karena HP lama tidak mendukung cipher ECDSA.
      */
-    private static final java.util.Map<String, String> TLS_FALLBACK = new java.util.HashMap<>();
-    static {
-        TLS_FALLBACK.put("musik.altairk.my.id", "https://159.223.110.159:24191");
-        TLS_FALLBACK.put("bore.pub", "https://159.223.110.159:24191");
+    private static final String BORE_HOST = "bore.pub";
+    /** Port TLS cadangan, dicoba berurutan (bore.pub kadang masih memegang port lama). */
+    private static final String[] BORE_PORTS = {"24191", "24192", "24193", "24194", "24195", "24190"};
+
+    /** true bila host ini jalur publik yang punya cadangan TLS. */
+    private static boolean hasFallback(String host) {
+        return "musik.altairk.my.id".equals(host) || BORE_HOST.equals(host);
+    }
+
+    /** URL cadangan ke-n. */
+    private static String fallbackUrl(String host, int idx) {
+        String p = BORE_PORTS[Math.min(idx, BORE_PORTS.length - 1)];
+        return "https://" + BORE_HOST + ":" + p;
     }
 
     private static boolean tlsTrouble(IOException e) {
@@ -63,23 +72,31 @@ public final class Api {
     /** Jalankan permintaan; bila TLS gagal, ulangi sekali ke jalur TLS cadangan (sertifikat kita). */
     private static void call(final Request req, final Callback cb) {
         HTTP.newCall(req).enqueue(new Callback() {
+            private int portIdx = -1;
+
             @Override public void onFailure(Call call, IOException e) {
                 String host = req.url().host();
                 if (APP != null) Log2.trace(APP, "fail proto=" + req.url().scheme()
                         + " tls=" + Net.provider() + " " + e.getClass().getSimpleName());
-                String alt = TLS_FALLBACK.get(host);
-                if (alt != null && tlsTrouble(e)) {
-                    try {
-                        java.net.URI a = java.net.URI.create(alt);
-                        String base = a.getScheme() + "://" + a.getAuthority();
-                        String url = base + req.url().encodedPath()
-                                + (req.url().encodedQuery() == null ? "" : "?" + req.url().encodedQuery());
-                        Request r2 = req.newBuilder().url(url).build();
-                        if (APP != null) Log2.trace(APP, "tls fallback " + host + " -> " + url);
-                        Prefs.setAltTls(APP, true);   // audio & cover ikut jalur ini
-                        HTTP.newCall(r2).enqueue(cb);
-                        return;
-                    } catch (Throwable ignored) { }
+
+                boolean canRetry = hostOf(Prefs.server(APP)).equals(host)
+                        ? hasFallback(host)
+                        : BORE_HOST.equals(host) && req.url().port() > 0;
+
+                if (canRetry && tlsTrouble(e)) {
+                    int next = portIdx + 1;
+                    if (next < BORE_PORTS.length) {
+                        portIdx = next;
+                        try {
+                            String url = fallbackUrl(host, portIdx) + req.url().encodedPath()
+                                    + (req.url().encodedQuery() == null ? "" : "?" + req.url().encodedQuery());
+                            Request r2 = req.newBuilder().url(url).build();
+                            if (APP != null) Log2.trace(APP, "tls fallback -> " + url);
+                            Prefs.setAltTls(APP, true);
+                            HTTP.newCall(r2).enqueue(this);
+                            return;
+                        } catch (Throwable ignored) { }
+                    }
                 }
                 cb.onFailure(call, e);
             }
@@ -127,10 +144,16 @@ public final class Api {
     public static String base(Context c) {
         String srv = Prefs.server(c);
         if (!Prefs.altTls(c)) return srv;
-        for (java.util.Map.Entry<String, String> e : TLS_FALLBACK.entrySet()) {
-            if (srv.contains(e.getKey())) return e.getValue();
-        }
+        if (hasFallback(hostOf(srv))) return fallbackUrl(hostOf(srv), 0);
         return srv;
+    }
+
+    private static String hostOf(String url) {
+        try {
+            return java.net.URI.create(url).getHost();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     public static String stream(Context c, String id) {
