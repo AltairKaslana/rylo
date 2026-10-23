@@ -126,10 +126,10 @@ public final class Api {
     /** Base URL efektif: jalur TLS cadangan dipakai bila sudah pernah diperlukan. */
     public static String base(Context c) {
         String srv = Prefs.server(c);
-        try {
-            String alt = TLS_FALLBACK.get(java.net.URI.create(srv).getHost());
-            if (alt != null && Prefs.altTls(c)) return alt;
-        } catch (Exception ignored) { }
+        if (!Prefs.altTls(c)) return srv;
+        for (java.util.Map.Entry<String, String> e : TLS_FALLBACK.entrySet()) {
+            if (srv.contains(e.getKey())) return e.getValue();
+        }
         return srv;
     }
 
@@ -216,13 +216,13 @@ public final class Api {
         if (Prefs.server(app).isEmpty()) { cb.err("Alamat server masih kosong"); return; }
         Request req;
         try {
-            req = new Request.Builder().url(Prefs.server(app) + "/health")
+            req = new Request.Builder().url(base(app) + "/health")
                     .header("X-Token", Prefs.token(app))
                     .header("X-Profile", Prefs.profile(app)).build();
         } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
         call(req, new Callback() {
             @Override public void onFailure(Call call, IOException e) {
-                final String why = Log2.write(app, "PING " + Prefs.server(app), e);
+                final String why = Log2.write(app, "PING " + base(app), e);
                 UI.post(() -> cb.err("Gagal: " + why));
             }
             @Override public void onResponse(Call call, Response resp) {
@@ -251,7 +251,7 @@ public final class Api {
                 okhttp3.MediaType.parse("application/json; charset=utf-8"), json == null ? "{}" : json);
         Request.Builder rb;
         try {
-            rb = new Request.Builder().url(Prefs.server(app) + path)
+            rb = new Request.Builder().url(base(app) + path)
                     .header("X-Token", Prefs.token(app))
                     .header("X-Profile", Prefs.profile(app));
         } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
@@ -328,7 +328,7 @@ public final class Api {
                 okhttp3.MediaType.parse("application/json; charset=utf-8"), o.toString());
         Request req;
         try {
-            req = new Request.Builder().url(Prefs.server(app) + "/lib/playlists")
+            req = new Request.Builder().url(base(app) + "/lib/playlists")
                     .header("X-Token", Prefs.token(app))
                     .header("X-Profile", Prefs.profile(app)).post(body).build();
         } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
@@ -399,7 +399,7 @@ public final class Api {
     public static void prefetch(Context c, String id) {
         if (!Prefs.ready(c)) return;
         try {
-            Request r = new Request.Builder().url(Prefs.server(c) + "/prefetch/" + id)
+            Request r = new Request.Builder().url(base(c) + "/prefetch/" + id)
                     .header("X-Token", Prefs.token(c))
                     .header("X-Profile", Prefs.profile(c)).build();
             HTTP.newCall(r).enqueue(new Callback() {
