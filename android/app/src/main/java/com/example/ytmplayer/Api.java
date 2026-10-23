@@ -48,8 +48,8 @@ public final class Api {
      */
     private static final java.util.Map<String, String> TLS_FALLBACK = new java.util.HashMap<>();
     static {
-        TLS_FALLBACK.put("musik.altairk.my.id", "https://bore.pub:24191");
-        TLS_FALLBACK.put("bore.pub", "https://bore.pub:24191");
+        TLS_FALLBACK.put("musik.altairk.my.id", "https://159.223.110.159:24191");
+        TLS_FALLBACK.put("bore.pub", "https://159.223.110.159:24191");
     }
 
     private static boolean tlsTrouble(IOException e) {
@@ -105,6 +105,7 @@ public final class Api {
                 .connectTimeout(8, TimeUnit.SECONDS).readTimeout(40, TimeUnit.SECONDS);
         if (Net.socketFactory() != null && Net.trustManager() != null) {
             b.sslSocketFactory(Net.socketFactory(), Net.trustManager());
+            b.hostnameVerifier(Net.pinnedVerifier());
         }
         return b.build();
     }

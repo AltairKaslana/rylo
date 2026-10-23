@@ -110,6 +110,35 @@ public final class Net {
         }
     }
 
+    /** Verifier: terima host apa pun ASALKAN sertifikatnya persis sertifikat relay kita. */
+    public static javax.net.ssl.HostnameVerifier pinnedVerifier() {
+        return new javax.net.ssl.HostnameVerifier() {
+            private final javax.net.ssl.HostnameVerifier dflt =
+                    javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier();
+
+            @Override public boolean verify(String host, javax.net.ssl.SSLSession session) {
+                try {
+                    java.security.cert.Certificate[] chain = session.getPeerCertificates();
+                    if (chain != null && chain.length > 0
+                            && chain[0] instanceof X509Certificate) {
+                        java.security.MessageDigest md =
+                                java.security.MessageDigest.getInstance("SHA-256");
+                        byte[] fp = md.digest(chain[0].getEncoded());
+                        StringBuilder sb = new StringBuilder();
+                        for (byte b : fp) sb.append(String.format("%02x", b));
+                        if (PIN_FP.equals(sb.toString())) return true;
+                    }
+                } catch (Throwable ignored) { }
+                try { return dflt.verify(host, session); } catch (Throwable ignored) { }
+                return false;
+            }
+        };
+    }
+
+    /** SHA-256 sertifikat relay (hex, tanpa titik dua) - dipakai untuk pinning. */
+    private static final String PIN_FP =
+            "32d2762b0a17e800dd99a7d6f9637f08c847dca6c9ba2e000ada2a3d9966b1ea";
+
     public static SSLSocketFactory socketFactory() { return factory; }
 
     public static X509TrustManager trustManager() { return trust; }
