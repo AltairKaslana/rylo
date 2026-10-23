@@ -502,8 +502,12 @@ def recent_searches(profile: str = Depends(prof), limit: int = 12):
 
 
 @app.post("/lib/recent-searches")
-def remember_search(q: str, kind: str = "songs", profile: str = Depends(prof)):
-    lib.search_add(profile, q, kind)
+async def remember_search(request: Request, profile: str = Depends(prof)):
+    body = await _json(request)
+    q = (body.get("q") or "").strip()
+    if not q:
+        raise HTTPException(400, "q wajib")
+    lib.search_add(profile, q, body.get("kind") or "songs")
     return {"ok": True}
 
 
