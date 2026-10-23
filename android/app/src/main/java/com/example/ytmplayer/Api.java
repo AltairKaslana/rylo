@@ -41,30 +41,40 @@ public final class Api {
     /** Dipanggil sekali dari App.onCreate supaya fallback bisa mencatat log. */
     public static void attach(Context c) { APP = c.getApplicationContext(); }
 
-    /** Kalau DNS gagal untuk host ini, coba alamat IP cadangan (DNS operator kadang memblokir). */
-    private static final java.util.Map<String, String> HOST_FALLBACK = new java.util.HashMap<>();
+    /** Host publik -> alamat cadangan (HTTP polos) untuk HP yang TLS-nya tidak sanggup. */
+    private static final java.util.Map<String, String> PLAIN_FALLBACK = new java.util.HashMap<>();
     static {
-        HOST_FALLBACK.put("bore.pub", "159.223.110.159");
-        HOST_FALLBACK.put("aml-s9xx-box.tailac3237.ts.net", "159.223.110.159");
-        HOST_FALLBACK.put("hosting-brandon-milwaukee-myself.trycloudflare.com", "159.223.110.159");
-        HOST_FALLBACK.put("musik.altairk.my.id", "104.21.17.5");
+        PLAIN_FALLBACK.put("musik.altairk.my.id", "http://159.223.110.159:24190");
+        PLAIN_FALLBACK.put("bore.pub", "http://159.223.110.159:24190");
     }
 
-    /** Jalankan permintaan; kalau host tidak bisa di-resolve, ulangi sekali lewat IP cadangan. */
+    private static boolean tlsTrouble(IOException e) {
+        if (e instanceof javax.net.ssl.SSLException) return true;
+        if (e instanceof java.net.UnknownHostException) return true;
+        if (e instanceof java.net.ConnectException) return true;
+        if (e instanceof java.net.SocketTimeoutException) return true;
+        return false;
+    }
+
+    /**
+     * Jalankan permintaan. Bila gagal karena TLS/DNS, ulangi sekali ke alamat HTTP cadangan
+     * (bore) supaya perangkat lama tetap bisa memutar musik.
+     */
     private static void call(final Request req, final Callback cb) {
         HTTP.newCall(req).enqueue(new Callback() {
             @Override public void onFailure(Call call, IOException e) {
                 String host = req.url().host();
-                String ip = HOST_FALLBACK.get(host);
-                boolean dnsFail = e instanceof java.net.UnknownHostException
-                        || e instanceof java.net.ConnectException
-                        || e instanceof java.net.SocketTimeoutException;
-                if (ip != null && dnsFail) {
+                String alt = PLAIN_FALLBACK.get(host);
+                if (alt != null && tlsTrouble(e)) {
                     try {
-                        Request alt = req.newBuilder()
-                                .url(req.url().newBuilder().host(ip).build()).build();
-                        if (APP != null) Log2.trace(APP, "fallback " + host + " -> " + ip);
-                        HTTP.newCall(alt).enqueue(cb);
+                        String base = alt.endsWith("/") ? alt.substring(0, alt.length() - 1) : alt;
+                        String path = req.url().encodedPath();
+                        String query = req.url().encodedQuery();
+                        String url = base + path + (query == null ? "" : "?" + query);
+                        Request r2 = req.newBuilder().url(url).build();
+                        if (APP != null) Log2.trace(APP, "plain fallback " + host + " -> " + url);
+                        Prefs.setPlainMode(APP, true);   // audio juga ikut jalur HTTP
+                        HTTP.newCall(r2).enqueue(cb);
                         return;
                     } catch (Throwable ignored) { }
                 }
@@ -105,14 +115,21 @@ public final class Api {
         synchronized (CACHE) { CACHE.clear(); }
     }
 
+    /** Alamat audio. Kalau perangkat sudah pernah gagal TLS, langsung pakai jalur HTTP cadangan. */
     public static String stream(Context c, String id) {
-        return Prefs.server(c) + "/stream/" + id + "?t=" + enc(Prefs.token(c));
+        String srv = Prefs.server(c);
+        String plain = PLAIN_FALLBACK.get(java.net.URI.create(srv).getHost());
+        if (plain != null && Prefs.plainMode(c)) srv = plain;
+        return srv + "/stream/" + id + "?t=" + enc(Prefs.token(c));
     }
 
     public static String img(Context c, String url, int px) {
         if (url == null || url.isEmpty()) return null;
         int s = px <= 200 ? 200 : (px <= 300 ? 300 : 500);
-        return Prefs.server(c) + "/img?s=" + s + "&t=" + enc(Prefs.token(c)) + "&u=" + enc(url);
+        String srv = Prefs.server(c);
+        String plain = PLAIN_FALLBACK.get(java.net.URI.create(srv).getHost());
+        if (plain != null && Prefs.plainMode(c)) srv = plain;
+        return srv + "/img?s=" + s + "&t=" + enc(Prefs.token(c)) + "&u=" + enc(url);
     }
 
     public static void thumb(ImageView v, String url, int px, int radiusDp) {
