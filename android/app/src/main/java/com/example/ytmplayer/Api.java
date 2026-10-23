@@ -148,27 +148,20 @@ public final class Api {
         });
     }
 
-    /** Satu entri pencarian terakhir (termasuk lagu yang dipilih pengguna). */
+    /** Satu entri pencarian terakhir + daftar lagu yang pernah dipilih darinya. */
     public static class Recent {
         public String query, kind;
         public long at;
-        public String video_id, title, subtitle, thumb;
-        public int dur;
+        public List<Item> items;
 
         /** True kalau ada lagu tersimpan -> bisa langsung diputar. */
         public boolean hasTrack() {
-            return video_id != null && !video_id.isEmpty();
+            return items != null && !items.isEmpty();
         }
 
-        /** Jadikan Item supaya bisa langsung diputar. */
-        public Item toItem() {
-            Item it = new Item();
-            it.id = video_id;
-            it.title = title != null ? title : query;
-            it.subtitle = subtitle != null ? subtitle : "";
-            it.thumb = thumb;
-            it.dur = dur;
-            return it;
+        /** Lagu terbaru yang dipilih dari pencarian ini. */
+        public Item lastTrack() {
+            return hasTrack() ? items.get(0) : null;
         }
     }
 
@@ -201,9 +194,18 @@ public final class Api {
                 });
     }
 
-    /** Hapus satu / semua pencarian terakhir (q kosong = semua). */
+    /** Hapus semua pencarian terakhir. */
     public static void forgetSearch(Context c, String q) {
         String path = "/lib/recent-searches" + (q == null || q.isEmpty() ? "" : "?q=" + enc(q));
+        send(c, "DELETE", path, "{}", new Cb<Ok>() {
+            @Override public void ok(Ok r) { }
+            @Override public void err(String m) { }
+        });
+    }
+
+    /** Hapus satu lagu dari riwayat sebuah pencarian. */
+    public static void forgetSearchItem(Context c, String q, String vid) {
+        String path = "/lib/recent-searches?q=" + enc(q) + "&vid=" + enc(vid);
         send(c, "DELETE", path, "{}", new Cb<Ok>() {
             @Override public void ok(Ok r) { }
             @Override public void err(String m) { }

@@ -514,9 +514,11 @@ async def remember_search(request: Request, profile: str = Depends(prof)):
 
 
 @app.delete("/lib/recent-searches")
-def forget_search(q: str = "", profile: str = Depends(prof)):
-    """q kosong = hapus semua."""
-    if q.strip():
+async def forget_search(request: Request, profile: str = Depends(prof), q: str = "", vid: str = ""):
+    """Hapus satu lagu (q+vid), satu pencarian (q), atau semua (tanpa q)."""
+    if q.strip() and vid.strip():
+        lib.search_item_remove(profile, q, vid)
+    elif q.strip():
         lib.search_remove(profile, q)
     else:
         lib.search_clear(profile)

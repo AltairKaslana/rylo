@@ -63,6 +63,17 @@ def init():
             added_at    INTEGER,
             PRIMARY KEY (playlist_id, video_id)
         );
+        CREATE TABLE IF NOT EXISTS search_items (
+            profile   TEXT NOT NULL DEFAULT 'default',
+            query     TEXT NOT NULL,
+            video_id  TEXT NOT NULL,
+            title     TEXT,
+            subtitle  TEXT,
+            thumb     TEXT,
+            dur       INTEGER DEFAULT 0,
+            picked_at INTEGER,
+            PRIMARY KEY (profile, query, video_id)
+        );
         CREATE TABLE IF NOT EXISTS searches (
             profile   TEXT NOT NULL DEFAULT 'default',
             query     TEXT NOT NULL,
@@ -82,6 +93,17 @@ def init():
             played_at INTEGER
         );
         """)
+        c.execute("""CREATE TABLE IF NOT EXISTS search_items (
+            profile   TEXT NOT NULL DEFAULT 'default',
+            query     TEXT NOT NULL,
+            video_id  TEXT NOT NULL,
+            title     TEXT,
+            subtitle  TEXT,
+            thumb     TEXT,
+            dur       INTEGER DEFAULT 0,
+            picked_at INTEGER,
+            PRIMARY KEY (profile, query, video_id)
+        )""")
         # migrasi pencarian terakhir: tambah kolom lagu yang dipilih
         scols = [r["name"] for r in c.execute("PRAGMA table_info(searches)")]
         for col, ddl in (("video_id", "TEXT"), ("title", "TEXT"), ("subtitle", "TEXT"),
@@ -299,6 +321,21 @@ def search_add(profile, q, kind="songs", item=None):
     item = item or {}
     vid = (item.get("video_id") or item.get("videoId") or "").strip()
     with _conn() as c:
+        if vid:
+            # riwayat lagu yang dipilih untuk pencarian ini (bisa lebih dari satu)
+            c.execute("""INSERT INTO search_items
+                         (profile, query, video_id, title, subtitle, thumb, dur, picked_at)
+                         VALUES (?,?,?,?,?,?,?,?)
+                         ON CONFLICT(profile, query, video_id) DO UPDATE SET
+                            title=excluded.title, subtitle=excluded.subtitle,
+                            thumb=excluded.thumb, dur=excluded.dur,
+                            picked_at=excluded.picked_at""",
+                      (profile, q, vid, item.get("title"), item.get("subtitle"),
+                       item.get("thumb"), int(item.get("dur") or 0), _now()))
+            # sisakan 8 lagu terbaru per pencarian
+            c.execute("""DELETE FROM search_items WHERE profile=? AND query=? AND video_id NOT IN (
+                            SELECT video_id FROM search_items WHERE profile=? AND query=?
+                            ORDER BY picked_at DESC LIMIT 8)""", (profile, q, profile, q))
         c.execute("INSERT OR IGNORE INTO profiles (id,name,created_at) VALUES (?,'Utama',?)",
                   (profile, _now()))
         c.execute("""INSERT INTO searches (profile, query, kind, searched_at,
@@ -322,26 +359,48 @@ def search_add(profile, q, kind="songs", item=None):
 def searches(profile, limit=12):
     """Daftar pencarian terakhir, terbaru lebih dulu."""
     with _conn() as c:
-        rows = c.execute("""SELECT query, kind, searched_at, video_id, title,
-                                   subtitle, thumb, dur
-                            FROM searches WHERE profile=?
-                            ORDER BY searched_at DESC LIMIT ?""",
+        rows = c.execute("""SELECT query, kind, searched_at FROM searches
+                            WHERE profile=? ORDER BY searched_at DESC LIMIT ?""",
                          (profile, limit)).fetchall()
-    return [dict(query=r["query"], kind=r["kind"] or "songs",
-                 at=r["searched_at"],
-                 video_id=r["video_id"], title=r["title"],
-                 subtitle=r["subtitle"], thumb=r["thumb"],
-                 dur=r["dur"] or 0) for r in rows]
+        out = []
+        for r in rows:
+            q = r["query"]
+            # lagu dari riwayat (bisa banyak); kalau kosong, pakai kolom lama
+            def _baris(r):
+                # kind="song" wajib: tanpa itu aplikasi membuka halaman detail, bukan memutar
+                return dict(kind="song", id=r["video_id"], title=r["title"],
+                            subtitle=r["subtitle"], thumb=r["thumb"], dur=r["dur"] or 0)
+            items = [_baris(x) for x in c.execute(
+                """SELECT video_id, title, subtitle, thumb, dur FROM search_items
+                   WHERE profile=? AND query=? ORDER BY picked_at DESC""",
+                (profile, q)).fetchall()]
+            if not items:
+                lama = c.execute("""SELECT video_id, title, subtitle, thumb, dur
+                                    FROM searches WHERE profile=? AND query=?""",
+                                 (profile, q)).fetchone()
+                if lama and lama["video_id"]:
+                    items = [_baris(lama)]
+            out.append(dict(query=q, kind=r["kind"] or "songs",
+                            at=r["searched_at"], items=items))
+    return out
+
+
+def search_item_remove(profile, q, vid):
+    with _conn() as c:
+        c.execute("DELETE FROM search_items WHERE profile=? AND query=? AND video_id=?",
+                  (profile, q, vid))
 
 
 def search_clear(profile):
     with _conn() as c:
         c.execute("DELETE FROM searches WHERE profile=?", (profile,))
+        c.execute("DELETE FROM search_items WHERE profile=?", (profile,))
 
 
 def search_remove(profile, q):
     with _conn() as c:
         c.execute("DELETE FROM searches WHERE profile=? AND query=?", (profile, q))
+        c.execute("DELETE FROM search_items WHERE profile=? AND query=?", (profile, q))
 
 
 def stats(profile):
