@@ -7,8 +7,8 @@ android {
         applicationId "com.example.ytmplayer"
         minSdk 19
         targetSdk 33
-        versionCode 26
-        versionName "3.5"
+        versionCode 27
+        versionName "3.6"
         multiDexEnabled true
         vectorDrawables.useSupportLibrary = true
     }

@@ -32,6 +32,11 @@ public final class Prefs {
     /** True kalau perangkat ini perlu jalur TLS cadangan (sertifikat RSA kita sendiri). */
     public static boolean altTls(Context c) { return sp(c).getBoolean("alt_tls", false); }
 
+    /** Port tunnel yang sudah terbukti berhasil (0 = belum tahu). */
+    public static int borePort(Context c) { return sp(c).getInt("bore_port", 0); }
+
+    public static void setBorePort(Context c, int port) { sp(c).edit().putInt("bore_port", port).apply(); }
+
     public static void setAltTls(Context c, boolean on) {
         sp(c).edit().putBoolean("alt_tls", on).apply();
     }

@@ -62,6 +62,21 @@ public final class Playback {
 
             @Override public void onPlayerError(PlaybackException e) {
                 errors++;
+                // Gagal konek? pindah port tunnel lalu coba lagu yang sama sekali lagi.
+                if (errors == 1 && Api.hostOf(Api.base(app)).equals("bore.pub")) {
+                    int p = Api.nextPort(app);
+                    Log2.trace(app, "playback error -> port " + p);
+                    Item cur = current();
+                    if (cur != null) {
+                        int idx = player.getCurrentMediaItemIndex();
+                        java.util.List<MediaItem> mis = new ArrayList<>();
+                        for (Item q : queue) mis.add(mediaItem(q));
+                        player.setMediaItems(mis, idx, C.TIME_UNSET);
+                        player.prepare();
+                        player.play();
+                        return;
+                    }
+                }
                 if (errors <= 3 && player.hasNextMediaItem()) {
                     player.seekToNextMediaItem();
                     player.prepare();

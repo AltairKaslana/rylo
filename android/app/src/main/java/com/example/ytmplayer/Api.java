@@ -47,18 +47,53 @@ public final class Api {
      * Dipakai bila HTTPS Cloudflare gagal karena HP lama tidak mendukung cipher ECDSA.
      */
     private static final String BORE_HOST = "bore.pub";
-    /** Port TLS cadangan, dicoba berurutan (bore.pub kadang masih memegang port lama). */
-    private static final String[] BORE_PORTS = {"24191", "24192", "24193", "24194", "24195", "24190"};
+    /** Port tunnel TLS, dicoba berurutan. 24193 = port aktif saat ini. */
+    private static final int[] BORE_PORTS = {24193, 24191, 24192, 24194, 24195, 24190};
 
-    /** true bila host ini jalur publik yang punya cadangan TLS. */
     private static boolean hasFallback(String host) {
         return "musik.altairk.my.id".equals(host) || BORE_HOST.equals(host);
     }
 
-    /** URL cadangan ke-n. */
-    private static String fallbackUrl(String host, int idx) {
-        String p = BORE_PORTS[Math.min(idx, BORE_PORTS.length - 1)];
-        return "https://" + BORE_HOST + ":" + p;
+    public static String hostOf(String url) {
+        try { return java.net.URI.create(url).getHost(); } catch (Exception e) { return ""; }
+    }
+
+    /** Port yang harus dipakai: kalau sudah pernah berhasil, pakai itu. */
+    public static int activePort(Context c) {
+        int saved = Prefs.borePort(c);
+        if (saved > 0) return saved;
+        return BORE_PORTS[0];
+    }
+
+    /** Cari port yang bisa dihubungi. Mengembalikan 0 kalau semua mati. */
+    public static int probePort(Context c) {
+        for (int p : BORE_PORTS) {
+            try {
+                Request r = new Request.Builder().url("https://" + BORE_HOST + ":" + p + "/health?t="
+                        + enc(Prefs.token(c))).header("X-Profile", Prefs.profile(c)).build();
+                Response resp = HTTP.newCall(r).execute();
+                int code = resp.code();
+                resp.close();
+                if (code == 200) {
+                    Prefs.setBorePort(c, p);
+                    Prefs.setAltTls(c, true);
+                    return p;
+                }
+            } catch (Throwable ignored) { }
+        }
+        return 0;
+    }
+
+    /** Pindah ke port berikutnya (dipakai saat audio gagal). */
+    public static int nextPort(Context c) {
+        int cur = activePort(c);
+        int idx = 0;
+        for (int i = 0; i < BORE_PORTS.length; i++) {
+            if (BORE_PORTS[i] == cur) { idx = i; break; }
+        }
+        int next = BORE_PORTS[(idx + 1) % BORE_PORTS.length];
+        Prefs.setBorePort(c, next);
+        return next;
     }
 
     private static boolean tlsTrouble(IOException e) {
@@ -72,36 +107,42 @@ public final class Api {
     /** Jalankan permintaan; bila TLS gagal, ulangi sekali ke jalur TLS cadangan (sertifikat kita). */
     private static void call(final Request req, final Callback cb) {
         HTTP.newCall(req).enqueue(new Callback() {
-            private int portIdx = -1;
-
             @Override public void onFailure(Call call, IOException e) {
-                String host = req.url().host();
                 if (APP != null) Log2.trace(APP, "fail proto=" + req.url().scheme()
                         + " tls=" + Net.provider() + " " + e.getClass().getSimpleName());
 
-                boolean canRetry = hostOf(Prefs.server(APP)).equals(host)
-                        ? hasFallback(host)
-                        : BORE_HOST.equals(host) && req.url().port() > 0;
-
-                if (canRetry && tlsTrouble(e)) {
-                    int next = portIdx + 1;
-                    if (next < BORE_PORTS.length) {
-                        portIdx = next;
-                        try {
-                            String url = fallbackUrl(host, portIdx) + req.url().encodedPath()
-                                    + (req.url().encodedQuery() == null ? "" : "?" + req.url().encodedQuery());
-                            Request r2 = req.newBuilder().url(url).build();
-                            if (APP != null) Log2.trace(APP, "tls fallback -> " + url);
-                            Prefs.setAltTls(APP, true);
-                            HTTP.newCall(r2).enqueue(this);
-                            return;
-                        } catch (Throwable ignored) { }
-                    }
+                String host = req.url().host();
+                if (hostOf(Prefs.server(APP)).equals(host) && hasFallback(host) && tlsTrouble(e)) {
+                    // domain gagal -> pindah ke tunnel dengan port terbaik
+                    try {
+                        int p = activePort(APP);
+                        String url = "https://" + BORE_HOST + ":" + p + req.url().encodedPath()
+                                + (req.url().encodedQuery() == null ? "" : "?" + req.url().encodedQuery());
+                        if (APP != null) Log2.trace(APP, "tls fallback -> " + url);
+                        Prefs.setAltTls(APP, true);
+                        HTTP.newCall(req.newBuilder().url(url).build()).enqueue(cb);
+                        return;
+                    } catch (Throwable ignored) { }
+                } else if (BORE_HOST.equals(host) && tlsTrouble(e)) {
+                    // port mati -> cari port lain
+                    int p = nextPort(APP);
+                    try {
+                        String url = "https://" + BORE_HOST + ":" + p + req.url().encodedPath()
+                                + (req.url().encodedQuery() == null ? "" : "?" + req.url().encodedQuery());
+                        if (APP != null) Log2.trace(APP, "port mati -> coba " + url);
+                        HTTP.newCall(req.newBuilder().url(url).build()).enqueue(cb);
+                        return;
+                    } catch (Throwable ignored) { }
                 }
                 cb.onFailure(call, e);
             }
 
             @Override public void onResponse(Call call, Response resp) throws IOException {
+                String host = req.url().host();
+                if (BORE_HOST.equals(host) && APP != null) {
+                    Prefs.setBorePort(APP, req.url().port());
+                    Prefs.setAltTls(APP, true);
+                }
                 cb.onResponse(call, resp);
             }
         });
@@ -144,11 +185,11 @@ public final class Api {
     public static String base(Context c) {
         String srv = Prefs.server(c);
         if (!Prefs.altTls(c)) return srv;
-        if (hasFallback(hostOf(srv))) return fallbackUrl(hostOf(srv), 0);
+        if (hasFallback(hostOf(srv))) return "https://" + BORE_HOST + ":" + activePort(c);
         return srv;
     }
 
-    private static String hostOf(String url) {
+    public static String hostOf(String url) {
         try {
             return java.net.URI.create(url).getHost();
         } catch (Exception e) {
