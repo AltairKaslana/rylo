@@ -137,7 +137,8 @@ public final class Api {
         }
         Request req;
         try {
-            req = new Request.Builder().url(url).header("X-Token", Prefs.token(app)).build();
+            req = new Request.Builder().url(url).header("X-Token", Prefs.token(app))
+                    .header("X-Profile", Prefs.profile(app)).build();
         } catch (Exception e) {
             cb.err("Alamat server tidak valid");
             return;
@@ -184,7 +185,8 @@ public final class Api {
         Request req;
         try {
             req = new Request.Builder().url(Prefs.server(app) + "/health")
-                    .header("X-Token", Prefs.token(app)).build();
+                    .header("X-Token", Prefs.token(app))
+                    .header("X-Profile", Prefs.profile(app)).build();
         } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
         call(req, new Callback() {
             @Override public void onFailure(Call call, IOException e) {
@@ -218,7 +220,8 @@ public final class Api {
         Request.Builder rb;
         try {
             rb = new Request.Builder().url(Prefs.server(app) + path)
-                    .header("X-Token", Prefs.token(app));
+                    .header("X-Token", Prefs.token(app))
+                    .header("X-Profile", Prefs.profile(app));
         } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
         if ("DELETE".equals(method)) rb.delete(body);
         else if ("PATCH".equals(method)) rb.patch(body);
@@ -254,6 +257,8 @@ public final class Api {
     }
 
     // ---- koleksi lokal ----
+    public static void recs(Context c, Cb<Items> cb) { get(c, "/recs?limit=20", 120000, Items.class, cb); }
+
     public static void favs(Context c, Cb<Items> cb) { get(c, "/lib/favorites", 0, Items.class, cb); }
 
     public static void history(Context c, Cb<Items> cb) { get(c, "/lib/history", 0, Items.class, cb); }
@@ -281,7 +286,8 @@ public final class Api {
         Request req;
         try {
             req = new Request.Builder().url(Prefs.server(app) + "/lib/playlists")
-                    .header("X-Token", Prefs.token(app)).post(body).build();
+                    .header("X-Token", Prefs.token(app))
+                    .header("X-Profile", Prefs.profile(app)).post(body).build();
         } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
         call(req, new Callback() {
             @Override public void onFailure(Call call, IOException e) {
@@ -351,7 +357,8 @@ public final class Api {
         if (!Prefs.ready(c)) return;
         try {
             Request r = new Request.Builder().url(Prefs.server(c) + "/prefetch/" + id)
-                    .header("X-Token", Prefs.token(c)).build();
+                    .header("X-Token", Prefs.token(c))
+                    .header("X-Profile", Prefs.profile(c)).build();
             HTTP.newCall(r).enqueue(new Callback() {
                 @Override public void onFailure(Call call, IOException e) { }
                 @Override public void onResponse(Call call, Response resp) { resp.close(); }

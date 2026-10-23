@@ -1,9 +1,11 @@
-"""library.py - koleksi milik pengguna: favorit, riwayat, playlist.
+"""library.py - koleksi pengguna: favorit, riwayat, playlist. Mendukung banyak profil.
 
-Disimpan di SQLite di server supaya tidak bergantung pada akun YouTube (yang sesinya
-sering dibatalkan Google) dan tidak hilang saat aplikasi dipasang ulang.
+Setiap perangkat bisa memakai profilnya sendiri (header X-Profile). Metadata lagu
+(tabel tracks) dipakai bersama supaya tidak dobel; favorit/playlist/riwayat terpisah
+per profil. Jadi satu server bisa melayani beberapa HP tanpa datanya bercampur.
 """
 import os
+import re
 import sqlite3
 import time
 
@@ -17,6 +19,15 @@ def _conn():
     return conn
 
 
+def clean_profile(p):
+    p = re.sub(r"[^A-Za-z0-9_-]", "", str(p or ""))[:40]
+    return p or "default"
+
+
+def _now():
+    return int(time.time())
+
+
 def init():
     with _conn() as c:
         c.executescript("""
@@ -28,12 +39,20 @@ def init():
             dur      INTEGER DEFAULT 0,
             seen_at  INTEGER
         );
+        CREATE TABLE IF NOT EXISTS profiles (
+            id         TEXT PRIMARY KEY,
+            name       TEXT,
+            created_at INTEGER
+        );
         CREATE TABLE IF NOT EXISTS favorites (
-            video_id TEXT PRIMARY KEY,
-            added_at INTEGER
+            profile  TEXT NOT NULL DEFAULT 'default',
+            video_id TEXT NOT NULL,
+            added_at INTEGER,
+            PRIMARY KEY (profile, video_id)
         );
         CREATE TABLE IF NOT EXISTS playlists (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile    TEXT NOT NULL DEFAULT 'default',
             name       TEXT NOT NULL,
             created_at INTEGER
         );
@@ -45,15 +64,19 @@ def init():
             PRIMARY KEY (playlist_id, video_id)
         );
         CREATE TABLE IF NOT EXISTS history (
-            id       INTEGER PRIMARY KEY AUTOINCREMENT,
-            video_id TEXT NOT NULL,
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile   TEXT NOT NULL DEFAULT 'default',
+            video_id  TEXT NOT NULL,
             played_at INTEGER
         );
         """)
-
-
-def _now():
-    return int(time.time())
+        # migrasi dari versi sebelum ada kolom profile
+        for table in ("favorites", "playlists", "history"):
+            cols = [r["name"] for r in c.execute("PRAGMA table_info(%s)" % table)]
+            if "profile" not in cols:
+                c.execute("ALTER TABLE %s ADD COLUMN profile TEXT NOT NULL DEFAULT 'default'" % table)
+        c.execute("INSERT OR IGNORE INTO profiles (id,name,created_at) VALUES ('default','Utama',?)",
+                  (_now(),))
 
 
 def _item(row):
@@ -63,7 +86,6 @@ def _item(row):
 
 
 def remember(c, t):
-    """Simpan/refresh metadata lagu."""
     vid = (t.get("videoId") or "").strip()
     if not vid:
         return None
@@ -77,51 +99,65 @@ def remember(c, t):
     return vid
 
 
+def touch_profile(profile, name=None):
+    with _conn() as c:
+        c.execute("INSERT OR IGNORE INTO profiles (id,name,created_at) VALUES (?,?,?)",
+                  (profile, name or profile, _now()))
+        if name:
+            c.execute("UPDATE profiles SET name=? WHERE id=?", (name, profile))
+        row = c.execute("SELECT id,name FROM profiles WHERE id=?", (profile,)).fetchone()
+        return {"id": row["id"], "name": row["name"]}
+
+
 # ---------- favorit ----------
-def fav_add(t):
+def fav_add(profile, t):
     with _conn() as c:
         vid = remember(c, t)
         if not vid:
             return False
-        c.execute("INSERT OR REPLACE INTO favorites (video_id, added_at) VALUES (?,?)", (vid, _now()))
+        c.execute("INSERT OR REPLACE INTO favorites (profile, video_id, added_at) VALUES (?,?,?)",
+                  (profile, vid, _now()))
         return True
 
 
-def fav_remove(vid):
+def fav_remove(profile, vid):
     with _conn() as c:
-        c.execute("DELETE FROM favorites WHERE video_id=?", (vid,))
+        c.execute("DELETE FROM favorites WHERE profile=? AND video_id=?", (profile, vid))
         return True
 
 
-def fav_has(vid):
+def fav_has(profile, vid):
     with _conn() as c:
-        return c.execute("SELECT 1 FROM favorites WHERE video_id=?", (vid,)).fetchone() is not None
+        return c.execute("SELECT 1 FROM favorites WHERE profile=? AND video_id=?",
+                         (profile, vid)).fetchone() is not None
 
 
-def favs():
+def favs(profile):
     with _conn() as c:
         rows = c.execute("""SELECT t.* FROM favorites f JOIN tracks t USING(video_id)
-                            ORDER BY f.added_at DESC""").fetchall()
+                            WHERE f.profile=? ORDER BY f.added_at DESC""", (profile,)).fetchall()
         return [_item(r) for r in rows]
 
 
 # ---------- riwayat ----------
-def history_add(t):
+def history_add(profile, t):
     with _conn() as c:
         vid = remember(c, t)
         if not vid:
             return False
-        c.execute("INSERT INTO history (video_id, played_at) VALUES (?,?)", (vid, _now()))
-        # buang duplikat berurutan supaya daftar tidak penuh lagu sama
-        c.execute("""DELETE FROM history WHERE id NOT IN
-                     (SELECT MAX(id) FROM history GROUP BY video_id)""")
+        c.execute("INSERT INTO history (profile, video_id, played_at) VALUES (?,?,?)",
+                  (profile, vid, _now()))
+        c.execute("""DELETE FROM history WHERE profile=? AND id NOT IN
+                     (SELECT MAX(id) FROM history WHERE profile=? GROUP BY video_id)""",
+                  (profile, profile))
         return True
 
 
-def history(limit=100):
+def history(profile, limit=100):
     with _conn() as c:
         rows = c.execute("""SELECT t.*, h.played_at FROM history h JOIN tracks t USING(video_id)
-                            ORDER BY h.played_at DESC LIMIT ?""", (limit,)).fetchall()
+                            WHERE h.profile=? ORDER BY h.played_at DESC LIMIT ?""",
+                         (profile, limit)).fetchall()
         out = []
         for r in rows:
             it = _item(r)
@@ -130,58 +166,74 @@ def history(limit=100):
         return out
 
 
-def history_clear():
+def history_clear(profile):
     with _conn() as c:
-        c.execute("DELETE FROM history")
+        c.execute("DELETE FROM history WHERE profile=?", (profile,))
         return True
 
 
 # ---------- playlist ----------
-def playlists():
+def playlists(profile):
     with _conn() as c:
         rows = c.execute("""SELECT p.id, p.name, COUNT(i.video_id) AS n
                             FROM playlists p LEFT JOIN playlist_items i ON i.playlist_id = p.id
-                            GROUP BY p.id ORDER BY p.created_at DESC""").fetchall()
+                            WHERE p.profile=? GROUP BY p.id ORDER BY p.created_at DESC""",
+                         (profile,)).fetchall()
         return [{"kind": "playlist", "id": str(r["id"]), "title": r["name"],
                  "subtitle": ("%d lagu" % r["n"]), "thumb": "", "dur": 0,
                  "count": r["n"]} for r in rows]
 
 
-def playlist_create(name):
+def playlist_create(profile, name):
     name = (name or "").strip()[:80]
     if not name:
         return None
     with _conn() as c:
-        cur = c.execute("INSERT INTO playlists (name, created_at) VALUES (?,?)", (name, _now()))
+        cur = c.execute("INSERT INTO playlists (profile, name, created_at) VALUES (?,?,?)",
+                        (profile, name, _now()))
         return {"kind": "playlist", "id": str(cur.lastrowid), "title": name,
                 "subtitle": "0 lagu", "thumb": "", "dur": 0, "count": 0}
 
 
-def playlist_delete(pid):
+def _owns(c, profile, pid):
+    return c.execute("SELECT 1 FROM playlists WHERE id=? AND profile=?",
+                     (pid, profile)).fetchone() is not None
+
+
+def playlist_delete(profile, pid):
     with _conn() as c:
+        if not _owns(c, profile, pid):
+            return False
         c.execute("DELETE FROM playlist_items WHERE playlist_id=?", (pid,))
         c.execute("DELETE FROM playlists WHERE id=?", (pid,))
         return True
 
 
-def playlist_rename(pid, name):
+def playlist_rename(profile, pid, name):
     name = (name or "").strip()[:80]
     if not name:
         return False
     with _conn() as c:
+        if not _owns(c, profile, pid):
+            return False
         c.execute("UPDATE playlists SET name=? WHERE id=?", (name, pid))
         return True
 
 
-def playlist_items(pid):
+def playlist_items(profile, pid):
     with _conn() as c:
+        if not _owns(c, profile, pid):
+            return []
         rows = c.execute("""SELECT t.* FROM playlist_items i JOIN tracks t USING(video_id)
-                            WHERE i.playlist_id=? ORDER BY i.position, i.added_at""", (pid,)).fetchall()
+                            WHERE i.playlist_id=? ORDER BY i.position, i.added_at""",
+                         (pid,)).fetchall()
         return [_item(r) for r in rows]
 
 
-def playlist_add(pid, t):
+def playlist_add(profile, pid, t):
     with _conn() as c:
+        if not _owns(c, profile, pid):
+            return False
         vid = remember(c, t)
         if not vid:
             return False
@@ -192,28 +244,39 @@ def playlist_add(pid, t):
         return True
 
 
-def playlist_remove(pid, vid):
+def playlist_remove(profile, pid, vid):
     with _conn() as c:
+        if not _owns(c, profile, pid):
+            return False
         c.execute("DELETE FROM playlist_items WHERE playlist_id=? AND video_id=?", (pid, vid))
         return True
 
 
 # ---------- pencarian lokal ----------
-def search(q, limit=60):
+def search(profile, q, limit=60):
     like = "%" + (q or "").strip() + "%"
     if len(like) < 4:
         return []
     with _conn() as c:
-        rows = c.execute("""SELECT * FROM tracks WHERE title LIKE ? OR subtitle LIKE ?
-                            ORDER BY seen_at DESC LIMIT ?""", (like, like, limit)).fetchall()
+        rows = c.execute("""
+            SELECT DISTINCT t.* FROM tracks t
+            WHERE (t.title LIKE ? OR t.subtitle LIKE ?)
+              AND (t.video_id IN (SELECT video_id FROM favorites WHERE profile=?)
+                OR t.video_id IN (SELECT video_id FROM history WHERE profile=?)
+                OR t.video_id IN (SELECT i.video_id FROM playlist_items i
+                                  JOIN playlists p ON p.id=i.playlist_id WHERE p.profile=?))
+            ORDER BY t.seen_at DESC LIMIT ?""",
+            (like, like, profile, profile, profile, limit)).fetchall()
         return [_item(r) for r in rows]
 
 
-def stats():
+def stats(profile):
     with _conn() as c:
         return {
-            "favorites": c.execute("SELECT COUNT(*) FROM favorites").fetchone()[0],
-            "playlists": c.execute("SELECT COUNT(*) FROM playlists").fetchone()[0],
-            "history": c.execute("SELECT COUNT(*) FROM history").fetchone()[0],
+            "profile": profile,
+            "favorites": c.execute("SELECT COUNT(*) FROM favorites WHERE profile=?", (profile,)).fetchone()[0],
+            "playlists": c.execute("SELECT COUNT(*) FROM playlists WHERE profile=?", (profile,)).fetchone()[0],
+            "history": c.execute("SELECT COUNT(*) FROM history WHERE profile=?", (profile,)).fetchone()[0],
             "tracks": c.execute("SELECT COUNT(*) FROM tracks").fetchone()[0],
+            "profiles": c.execute("SELECT COUNT(*) FROM profiles").fetchone()[0],
         }

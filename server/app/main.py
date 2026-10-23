@@ -370,118 +370,175 @@ async def setup_save(request: Request):
 
 # ---------------- koleksi lokal (tanpa akun YouTube) ----------------
 
+def prof(x_profile: str = Header(None)) -> str:
+    """Profil perangkat: header X-Profile. Tanpa header -> 'default'."""
+    return lib.clean_profile(x_profile)
+
+
+@app.get("/profile")
+def profile_info(profile: str = Depends(prof)):
+    return lib.touch_profile(profile)
+
+
+@app.post("/profile")
+async def profile_rename(request: Request, profile: str = Depends(prof)):
+    body = await _json(request)
+    return lib.touch_profile(profile, (body.get("name") or "").strip()[:40] or None)
+
+
 @app.get("/lib/stats")
-def lib_stats():
-    return lib.stats()
+def lib_stats(profile: str = Depends(prof)):
+    return lib.stats(profile)
 
 
 @app.get("/lib/favorites")
-def lib_favs():
-    return {"items": lib.favs()}
+def lib_favs(profile: str = Depends(prof)):
+    return {"items": lib.favs(profile)}
 
 
 @app.get("/lib/fav/{vid}")
-def lib_fav_status(vid: str):
+def lib_fav_status(vid: str, profile: str = Depends(prof)):
     check_vid(vid)
-    return {"fav": lib.fav_has(vid)}
+    return {"fav": lib.fav_has(profile, vid)}
 
 
 @app.post("/lib/fav")
-async def lib_fav_add(request: Request):
+async def lib_fav_add(request: Request, profile: str = Depends(prof)):
     body = await _json(request)
-    if not lib.fav_add(body):
+    if not lib.fav_add(profile, body):
         raise HTTPException(400, "videoId wajib")
     return {"ok": True, "fav": True}
 
 
 @app.delete("/lib/fav/{vid}")
-def lib_fav_del(vid: str):
+def lib_fav_del(vid: str, profile: str = Depends(prof)):
     check_vid(vid)
-    lib.fav_remove(vid)
+    lib.fav_remove(profile, vid)
     return {"ok": True, "fav": False}
 
 
 @app.get("/lib/history")
-def lib_history(limit: int = 100):
-    return {"items": lib.history(limit)}
+def lib_history(limit: int = 100, profile: str = Depends(prof)):
+    return {"items": lib.history(profile, limit)}
 
 
 @app.post("/lib/history")
-async def lib_history_add(request: Request):
+async def lib_history_add(request: Request, profile: str = Depends(prof)):
     body = await _json(request)
-    if not lib.history_add(body):
+    if not lib.history_add(profile, body):
         raise HTTPException(400, "videoId wajib")
     return {"ok": True}
 
 
 @app.delete("/lib/history")
-def lib_history_clear():
-    lib.history_clear()
+def lib_history_clear(profile: str = Depends(prof)):
+    lib.history_clear(profile)
     return {"ok": True}
 
 
 @app.get("/lib/playlists")
-def lib_playlists():
-    return {"items": lib.playlists()}
+def lib_playlists(profile: str = Depends(prof)):
+    return {"items": lib.playlists(profile)}
 
 
 @app.post("/lib/playlists")
-async def lib_playlist_create(request: Request):
+async def lib_playlist_create(request: Request, profile: str = Depends(prof)):
     body = await _json(request)
-    pl = lib.playlist_create(body.get("name"))
+    pl = lib.playlist_create(profile, body.get("name"))
     if not pl:
         raise HTTPException(400, "nama playlist kosong")
     return pl
 
 
 @app.patch("/lib/playlists/{pid}")
-async def lib_playlist_rename(pid: int, request: Request):
+async def lib_playlist_rename(pid: int, request: Request, profile: str = Depends(prof)):
     body = await _json(request)
-    if not lib.playlist_rename(pid, body.get("name")):
-        raise HTTPException(400, "nama playlist kosong")
+    if not lib.playlist_rename(profile, pid, body.get("name")):
+        raise HTTPException(400, "gagal ganti nama")
     return {"ok": True}
 
 
 @app.delete("/lib/playlists/{pid}")
-def lib_playlist_delete(pid: int):
-    lib.playlist_delete(pid)
+def lib_playlist_delete(pid: int, profile: str = Depends(prof)):
+    lib.playlist_delete(profile, pid)
     return {"ok": True}
 
 
 @app.get("/lib/playlists/{pid}")
-def lib_playlist_items(pid: int):
+def lib_playlist_items(pid: int, profile: str = Depends(prof)):
     name = None
-    for p in lib.playlists():
-        if p["id"] == str(pid):
-            name = p["title"]
+    for pl in lib.playlists(profile):
+        if pl["id"] == str(pid):
+            name = pl["title"]
             break
     return {"kind": "playlist", "id": str(pid), "title": name or "Playlist",
-            "subtitle": "lokal", "thumb": "", "tracks": lib.playlist_items(pid)}
+            "subtitle": "lokal", "thumb": "", "tracks": lib.playlist_items(profile, pid)}
 
 
 @app.post("/lib/playlists/{pid}/items")
-async def lib_playlist_add(pid: int, request: Request):
+async def lib_playlist_add(pid: int, request: Request, profile: str = Depends(prof)):
     body = await _json(request)
-    if not lib.playlist_add(pid, body):
-        raise HTTPException(400, "videoId wajib")
+    if not lib.playlist_add(profile, pid, body):
+        raise HTTPException(400, "videoId wajib / playlist bukan milik profil ini")
     return {"ok": True}
 
 
 @app.delete("/lib/playlists/{pid}/items/{vid}")
-def lib_playlist_remove(pid: int, vid: str):
+def lib_playlist_remove(pid: int, vid: str, profile: str = Depends(prof)):
     check_vid(vid)
-    lib.playlist_remove(pid, vid)
+    lib.playlist_remove(profile, pid, vid)
     return {"ok": True}
 
 
 @app.get("/lib/search")
-def lib_search(q: str):
-    return {"items": lib.search(q)}
+def lib_search(q: str, profile: str = Depends(prof)):
+    return {"items": lib.search(profile, q)}
+
+
+@app.get("/recs")
+def recs(profile: str = Depends(prof), limit: int = 20):
+    """Rekomendasi berbasis kebiasaan: benih dari favorit + riwayat, lanjut ke radio lagu itu."""
+    seeds = []
+    for it in lib.favs(profile)[:4] + lib.history(profile, 12):
+        if it["id"] not in seeds:
+            seeds.append(it["id"])
+        if len(seeds) >= 5:
+            break
+    recent = {x["id"] for x in lib.history(profile, 60)}
+    out, have = [], set()
+    for vid in seeds:
+        try:
+            for it in catalog.radio(vid):
+                if it["id"] in have or it["id"] in recent or it["id"] in seeds:
+                    continue
+                have.add(it["id"])
+                out.append(it)
+                if len(out) >= limit:
+                    break
+        except Exception:  # noqa: BLE001
+            continue
+        if len(out) >= limit:
+            break
+    if not out:
+        # cadangan: ambil dari beranda umum
+        try:
+            for sec in catalog.home():
+                for it in sec.get("items", []):
+                    if it.get("kind") == "song" and it["id"] not in have:
+                        have.add(it["id"])
+                        out.append(it)
+                        if len(out) >= limit:
+                            break
+                if len(out) >= limit:
+                    break
+        except Exception:  # noqa: BLE001
+            pass
+    return {"items": out, "seeds": len(seeds)}
 
 
 @app.post("/lib/import")
-def lib_import():
-    """Impor playlist dari akun YouTube (butuh login). Sekali pakai, hasilnya jadi playlist lokal."""
+def lib_import(profile: str = Depends(prof)):
+    """Impor playlist dari akun YouTube (butuh login aktif). Hasilnya jadi playlist lokal."""
     if not (catalog.authed() and catalog.session_alive()):
         raise HTTPException(403, "Perlu login YouTube yang masih aktif untuk impor. "
                                  "Semua fitur lokal tetap jalan tanpa login.")
@@ -493,12 +550,12 @@ def lib_import():
             d = catalog.detail("playlist", src["id"])
         except Exception:  # noqa: BLE001
             continue
-        pl = lib.playlist_create(src.get("title") or "Impor")
+        pl = lib.playlist_create(profile, src.get("title") or "Impor")
         n = 0
         for t in d.get("tracks") or []:
-            if lib.playlist_add(pl["id"], {"videoId": t["id"], "title": t.get("title"),
-                                               "subtitle": t.get("subtitle"),
-                                               "thumb": t.get("thumb"), "dur": t.get("dur")}):
+            if lib.playlist_add(profile, pl["id"], {"videoId": t["id"], "title": t.get("title"),
+                                                    "subtitle": t.get("subtitle"),
+                                                    "thumb": t.get("thumb"), "dur": t.get("dur")}):
                 n += 1
         created.append({"name": pl["title"], "tracks": n})
     return {"ok": True, "playlists": created}

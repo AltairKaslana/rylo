@@ -139,7 +139,9 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
         info.setPadding(0, 0, 0, Ui.dp(this, 10));
         box.addView(info);
 
-        final EditText s = field("http://192.168.1.9:8000", Prefs.server(this));
+        String current = Prefs.server(this);
+        final EditText s = field(Prefs.DEFAULT_SERVER,
+                current.isEmpty() ? Prefs.DEFAULT_SERVER : current);
         final EditText t = field("PIN (misal 4821)", Prefs.token(this));
         t.setInputType(InputType.TYPE_CLASS_NUMBER);
         t.setTextSize(22);

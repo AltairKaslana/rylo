@@ -10,7 +10,20 @@ public final class Prefs {
         return c.getApplicationContext().getSharedPreferences("ytm", Context.MODE_PRIVATE);
     }
 
+    /** Alamat bawaan supaya tidak perlu mengetik panjang saat pertama pasang. */
+    public static final String DEFAULT_SERVER = "http://bore.pub:24190";
+
     public static String server(Context c) { return sp(c).getString("server", ""); }
+
+    /** Profil perangkat: dibuat sekali, dipakai sebagai header X-Profile. */
+    public static String profile(Context c) {
+        String p = sp(c).getString("profile", "");
+        if (p == null || p.isEmpty()) {
+            p = "hp-" + Long.toHexString(System.currentTimeMillis() & 0xFFFFFFL);
+            sp(c).edit().putString("profile", p).apply();
+        }
+        return p;
+    }
 
     public static String token(Context c) { return sp(c).getString("token", ""); }
 
