@@ -52,7 +52,7 @@ public class SearchFragment extends BaseFragment {
                     Api.forgetSearch(requireContext(), r.query);
                     recentData.remove(r);
                     recentAdapter.notifyDataSetChanged();
-                    paintRecent();
+                    paintRecent(q.getText().toString().trim().isEmpty());
                 });
         recentList.setAdapter(recentAdapter);
 
@@ -60,7 +60,7 @@ public class SearchFragment extends BaseFragment {
             Api.forgetSearch(requireContext(), "");
             recentData.clear();
             recentAdapter.notifyDataSetChanged();
-            paintRecent();
+            paintRecent(q.getText().toString().trim().isEmpty());
         });
 
         paint();
