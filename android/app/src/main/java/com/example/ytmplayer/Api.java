@@ -47,6 +47,7 @@ public final class Api {
         HOST_FALLBACK.put("bore.pub", "159.223.110.159");
         HOST_FALLBACK.put("aml-s9xx-box.tailac3237.ts.net", "159.223.110.159");
         HOST_FALLBACK.put("hosting-brandon-milwaukee-myself.trycloudflare.com", "159.223.110.159");
+        HOST_FALLBACK.put("musik.altairk.my.id", "104.21.17.5");
     }
 
     private static void call(final Request req, final Callback cb) {

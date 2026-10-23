@@ -11,7 +11,7 @@ public final class Prefs {
     }
 
     /** Alamat bawaan supaya tidak perlu mengetik panjang saat pertama pasang. */
-    public static final String DEFAULT_SERVER = "http://bore.pub:24190";
+    public static final String DEFAULT_SERVER = "https://musik.altairk.my.id";
 
     public static String server(Context c) { return sp(c).getString("server", ""); }
 
