@@ -19,8 +19,8 @@ import java.util.List;
 public class Adapters_Recent {
     public interface OnPickQuery { void pick(Api.Recent r); }
     public interface OnDropQuery { void drop(Api.Recent r); }
-    public interface OnPickTrack { void pick(Api.Recent r, Api.Item it); }
-    public interface OnDropTrack { void drop(Api.Recent r, Api.Item it); }
+    public interface OnPickTrack { void pick(Api.Recent r, Item it); }
+    public interface OnDropTrack { void drop(Api.Recent r, Item it); }
 
     /** Waktu relatif singkat. */
     static String relatif(long at) {
@@ -91,7 +91,7 @@ public class Adapters_Recent {
 
     public static class TrackAdapter extends RecyclerView.Adapter<TrackVH> {
         private final Api.Recent recent;
-        private final List<Api.Item> data;
+        private final List<Item> data;
         private final OnPickTrack pick;
         private final OnDropTrack drop;
 
@@ -111,7 +111,7 @@ public class Adapters_Recent {
         }
 
         @Override public void onBindViewHolder(@NonNull TrackVH h, int p) {
-            final Api.Item it = data.get(p);
+            final Item it = data.get(p);
             h.title.setText(it.title != null ? it.title : recent.query);
             h.meta.setText(it.subtitle != null ? it.subtitle : "");
             h.itemView.setOnClickListener(x -> pick.pick(recent, it));
