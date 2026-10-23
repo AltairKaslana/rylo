@@ -65,6 +65,8 @@ public final class Api {
         HTTP.newCall(req).enqueue(new Callback() {
             @Override public void onFailure(Call call, IOException e) {
                 String host = req.url().host();
+                if (APP != null) Log2.trace(APP, "fail proto=" + req.url().scheme()
+                        + " tls=" + Net.provider() + " " + e.getClass().getSimpleName());
                 String alt = TLS_FALLBACK.get(host);
                 if (alt != null && tlsTrouble(e)) {
                     try {

@@ -22,6 +22,8 @@ public class App extends MultiDexApplication {
         super.onCreate();
         Net.install(this);   // root CA Let's Encrypt + TLS 1.2 untuk KitKat
         Api.attach(this);
+        Log2.trace(this, "TLS: " + Net.provider()
+                + (Net.lastError().isEmpty() ? "" : " | err=" + Net.lastError()));
         final Thread.UncaughtExceptionHandler prev = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
             @Override public void uncaughtException(Thread t, Throwable e) {
