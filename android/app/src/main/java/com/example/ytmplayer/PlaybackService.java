@@ -78,6 +78,7 @@ public class PlaybackService extends Service implements Playback.Listener {
 
     @Override public int onStartCommand(Intent i, int flags, int startId) {
         String a = i == null ? null : i.getAction();
+        if (a != null && a.startsWith("ytm.act.")) a = a.substring("ytm.act.".length());
         try {
             Log2.trace(this, "action=" + a);
             if (Intent.ACTION_MEDIA_BUTTON.equals(a)) {
@@ -152,7 +153,9 @@ public class PlaybackService extends Service implements Playback.Listener {
 
     private PendingIntent act(String action) {
         int f = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
-        Intent i = new Intent(this, ActionReceiver.class).putExtra("a", action);
+        Intent i = new Intent(this, ActionReceiver.class);
+        i.setAction("ytm.act." + action);   // aksi harus unik agar tiap tombol punya PendingIntent sendiri
+        i.putExtra("a", action);
         return PendingIntent.getBroadcast(this, action.hashCode(), i, f);
     }
 

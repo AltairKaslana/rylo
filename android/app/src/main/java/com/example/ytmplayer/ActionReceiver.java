@@ -16,7 +16,7 @@ public class ActionReceiver extends BroadcastReceiver {
         String action = i == null ? null : i.getStringExtra("a");
         if (action == null) return;
         try {
-            Intent svc = new Intent(c, PlaybackService.class).setAction(action);
+            Intent svc = new Intent(c, PlaybackService.class).setAction("ytm.act." + action);
             c.startService(svc);
         } catch (Throwable t) {
             Log2.write(c, "broadcast " + action, t);

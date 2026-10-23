@@ -28,6 +28,7 @@ public class HomeFragment extends BaseFragment {
 
     /** Rekomendasi dari kebiasaan sendiri (favorit + riwayat), bukan dari akun YouTube. */
     private void addRecs(final java.util.List<Api.Section> sections) {
+        // tampilkan dulu beranda apa adanya, rekomendasi menyusul tanpa menghalangi
         Api.recs(requireContext(), new Api.Cb<Api.Items>() {
             @Override public void ok(Api.Items r) {
                 if (!isAdded() || r.items == null || r.items.isEmpty()) return;

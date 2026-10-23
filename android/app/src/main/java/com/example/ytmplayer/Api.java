@@ -100,6 +100,9 @@ public final class Api {
 
     private static final OkHttpClient HTTP = buildClient();
 
+    /** Klien yang sama dipakai Glide & ExoPlayer supaya koneksi TLS dipakai ulang. */
+    public static OkHttpClient client() { return HTTP; }
+
     private static OkHttpClient buildClient() {
         OkHttpClient.Builder b = new OkHttpClient.Builder()
                 .connectTimeout(8, TimeUnit.SECONDS).readTimeout(40, TimeUnit.SECONDS);
@@ -137,10 +140,7 @@ public final class Api {
     public static String img(Context c, String url, int px) {
         if (url == null || url.isEmpty()) return null;
         int s = px <= 200 ? 200 : (px <= 300 ? 300 : 500);
-        String srv = Prefs.server(c);
-        String plain = TLS_FALLBACK.get(java.net.URI.create(srv).getHost());
-        if (plain != null && Prefs.altTls(c)) srv = plain;
-        return srv + "/img?s=" + s + "&t=" + enc(Prefs.token(c)) + "&u=" + enc(url);
+        return base(c) + "/img?s=" + s + "&t=" + enc(Prefs.token(c)) + "&u=" + enc(url);
     }
 
     public static void thumb(ImageView v, String url, int px, int radiusDp) {
@@ -157,7 +157,7 @@ public final class Api {
             cb.err("Server belum diatur (ketuk ikon gerigi di kanan atas)");
             return;
         }
-        final String url = Prefs.server(app) + path;
+        final String url = base(app) + path;
         if (ttl > 0) {
             synchronized (CACHE) {
                 Object[] h = CACHE.get(url);
@@ -289,7 +289,18 @@ public final class Api {
     }
 
     // ---- koleksi lokal ----
-    public static void recs(Context c, Cb<Items> cb) { get(c, "/recs?limit=20", 120000, Items.class, cb); }
+    public static void recs(Context c, Cb<Items> cb) {
+        get(c, "/recs?limit=20", 0, Items.class, new Cb<Items>() {
+            @Override public void ok(Items r) {
+                if (APP != null) Log2.trace(APP, "recs ok n=" + (r == null || r.items == null ? 0 : r.items.size()));
+                cb.ok(r);
+            }
+            @Override public void err(String m) {
+                if (APP != null) Log2.trace(APP, "recs err " + m);
+                cb.err(m);
+            }
+        });
+    }
 
     public static void favs(Context c, Cb<Items> cb) { get(c, "/lib/favorites", 0, Items.class, cb); }
 

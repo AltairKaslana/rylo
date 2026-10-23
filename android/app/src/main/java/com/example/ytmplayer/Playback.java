@@ -15,6 +15,8 @@ import com.google.android.exoplayer2.MediaItem;
 import com.google.android.exoplayer2.PlaybackException;
 import com.google.android.exoplayer2.Player;
 import com.google.android.exoplayer2.audio.AudioAttributes;
+import com.google.android.exoplayer2.source.DefaultMediaSourceFactory;
+import com.google.android.exoplayer2.upstream.DataSource;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -44,9 +46,16 @@ public final class Playback {
 
     private Playback(Context app) {
         this.app = app;
+        // DataSource OkHttp: koneksi TLS dipakai ulang => mulai lagu lebih cepat.
+        com.google.android.exoplayer2.ext.okhttp.OkHttpDataSource.Factory dsFactory =
+                new com.google.android.exoplayer2.ext.okhttp.OkHttpDataSource.Factory(Api.client());
+        dsFactory.setUserAgent("ytm-kitkat");
+        DataSource.Factory ds = dsFactory;
+
         player = new ExoPlayer.Builder(app)
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(ds))
                 .setLoadControl(new DefaultLoadControl.Builder()
-                        .setBufferDurationsMs(12000, 30000, 1000, 2000)
+                        .setBufferDurationsMs(15000, 45000, 1500, 3000)
                         .setPrioritizeTimeOverSizeThresholds(true).build())
                 .setAudioAttributes(new AudioAttributes.Builder()
                         .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
