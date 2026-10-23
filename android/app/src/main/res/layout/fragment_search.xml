@@ -15,6 +15,38 @@
         <TextView android:id="@+id/chip2" style="@style/Chip" android:text="Artis"/>
         <TextView android:id="@+id/chip3" style="@style/Chip" android:text="Playlist"/>
     </LinearLayout>
+
+    <!-- Panel pencarian terakhir: hanya terlihat saat kotak pencarian kosong -->
+    <LinearLayout android:id="@+id/recentPanel" android:layout_width="match_parent"
+        android:layout_height="0dp" android:layout_weight="1" android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="horizontal"
+            android:gravity="center_vertical" android:paddingLeft="14dp"
+            android:paddingRight="6dp" android:paddingTop="10dp" android:paddingBottom="6dp">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="Pencarian terakhir"
+                android:textColor="#FFFFFF" android:textSize="13sp" android:textStyle="bold"/>
+            <TextView android:id="@+id/recentClear" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="Hapus semua"
+                android:textColor="#7FB2FF" android:textSize="12sp"
+                android:padding="8dp"/>
+        </LinearLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recentList"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"/>
+
+        <TextView android:id="@+id/recentEmpty" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:padding="24dp"
+            android:gravity="center" android:text="Belum ada pencarian"
+            android:textColor="#8A8A8A" android:textSize="13sp"
+            android:visibility="gone"/>
+    </LinearLayout>
+
     <include layout="@layout/fragment_list" android:layout_width="match_parent"
         android:layout_height="0dp" android:layout_weight="1"/>
 </LinearLayout>

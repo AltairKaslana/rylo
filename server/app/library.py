@@ -63,6 +63,13 @@ def init():
             added_at    INTEGER,
             PRIMARY KEY (playlist_id, video_id)
         );
+        CREATE TABLE IF NOT EXISTS searches (
+            profile   TEXT NOT NULL DEFAULT 'default',
+            query     TEXT NOT NULL,
+            kind      TEXT,
+            searched_at INTEGER,
+            PRIMARY KEY (profile, query)
+        );
         CREATE TABLE IF NOT EXISTS history (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             profile   TEXT NOT NULL DEFAULT 'default',
@@ -268,6 +275,45 @@ def search(profile, q, limit=60):
             ORDER BY t.seen_at DESC LIMIT ?""",
             (like, like, profile, profile, profile, limit)).fetchall()
         return [_item(r) for r in rows]
+
+
+def search_add(profile, q, kind="songs"):
+    """Catat pencarian terakhir (naik ke atas, maksimal 12 disimpan)."""
+    q = (q or "").strip()
+    if not q:
+        return
+    with _conn() as c:
+        c.execute("INSERT OR IGNORE INTO profiles (id,name,created_at) VALUES (?,'Utama',?)",
+                  (profile, _now()))
+        c.execute("""INSERT INTO searches (profile, query, kind, searched_at)
+                     VALUES (?,?,?,?)
+                     ON CONFLICT(profile, query) DO UPDATE SET
+                        kind=excluded.kind, searched_at=excluded.searched_at""",
+                  (profile, q, kind or "songs", _now()))
+        # sisakan 12 terbaru saja
+        c.execute("""DELETE FROM searches WHERE profile=? AND query NOT IN (
+                        SELECT query FROM searches WHERE profile=?
+                        ORDER BY searched_at DESC LIMIT 12)""", (profile, profile))
+
+
+def searches(profile, limit=12):
+    """Daftar pencarian terakhir, terbaru lebih dulu."""
+    with _conn() as c:
+        rows = c.execute("""SELECT query, kind, searched_at FROM searches
+                            WHERE profile=? ORDER BY searched_at DESC LIMIT ?""",
+                         (profile, limit)).fetchall()
+    return [dict(query=r["query"], kind=r["kind"] or "songs",
+                 at=r["searched_at"]) for r in rows]
+
+
+def search_clear(profile):
+    with _conn() as c:
+        c.execute("DELETE FROM searches WHERE profile=?", (profile,))
+
+
+def search_remove(profile, q):
+    with _conn() as c:
+        c.execute("DELETE FROM searches WHERE profile=? AND query=?", (profile, q))
 
 
 def stats(profile):

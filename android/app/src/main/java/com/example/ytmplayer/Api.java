@@ -148,6 +148,40 @@ public final class Api {
         });
     }
 
+    /** Satu entri pencarian terakhir. */
+    public static class Recent {
+        public String query, kind;
+        public long at;
+    }
+
+    public static class Recents {
+        public List<Recent> items;
+    }
+
+    /** Pencarian terakhir (tersimpan di server, ikut profil). */
+    public static void recentSearches(Context c, Cb<Recents> cb) {
+        get(c, "/lib/recent-searches?limit=12", 0, Recents.class, cb);
+    }
+
+    /** Simpan pencarian (biar muncul sebagai rekomendasi nanti). */
+    public static void rememberSearch(Context c, String q, String kind) {
+        if (q == null || q.trim().isEmpty()) return;
+        get(c, "/lib/recent-searches?q=" + enc(q) + "&kind=" + enc(kind), 0, Ok.class,
+                new Cb<Ok>() {
+                    @Override public void ok(Ok r) { }
+                    @Override public void err(String m) { }
+                });
+    }
+
+    /** Hapus satu / semua pencarian terakhir (q kosong = semua). */
+    public static void forgetSearch(Context c, String q) {
+        String path = "/lib/recent-searches" + (q == null || q.isEmpty() ? "" : "?q=" + enc(q));
+        send(c, "DELETE", path, "{}", new Cb<Ok>() {
+            @Override public void ok(Ok r) { }
+            @Override public void err(String m) { }
+        });
+    }
+
     public static class Items { public List<Item> items; }
     public static class Section { public String title; public List<Item> items; }
     public static class Home { public List<Section> sections; }

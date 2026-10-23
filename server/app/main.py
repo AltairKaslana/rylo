@@ -495,6 +495,28 @@ def lib_search(q: str, profile: str = Depends(prof)):
     return {"items": lib.search(profile, q)}
 
 
+@app.get("/lib/recent-searches")
+def recent_searches(profile: str = Depends(prof), limit: int = 12):
+    """Pencarian terakhir, terbaru lebih dulu (dipakai tab Pencarian)."""
+    return {"items": lib.searches(profile, limit)}
+
+
+@app.post("/lib/recent-searches")
+def remember_search(q: str, kind: str = "songs", profile: str = Depends(prof)):
+    lib.search_add(profile, q, kind)
+    return {"ok": True}
+
+
+@app.delete("/lib/recent-searches")
+def forget_search(q: str = "", profile: str = Depends(prof)):
+    """q kosong = hapus semua."""
+    if q.strip():
+        lib.search_remove(profile, q)
+    else:
+        lib.search_clear(profile)
+    return {"ok": True}
+
+
 @app.get("/recs")
 def recs(profile: str = Depends(prof), limit: int = 20):
     """Rekomendasi berbasis kebiasaan: benih dari favorit + riwayat, lanjut ke radio lagu itu."""
