@@ -35,6 +35,43 @@ public final class Api {
         void err(String m);
     }
 
+
+    static Context APP;
+
+    /** Dipanggil sekali dari App.onCreate supaya fallback bisa mencatat log. */
+    public static void attach(Context c) { APP = c.getApplicationContext(); }
+
+    /** Kalau DNS gagal untuk host ini, coba alamat IP cadangan (DNS operator kadang memblokir). */
+    private static final java.util.Map<String, String> HOST_FALLBACK = new java.util.HashMap<>();
+    static {
+        HOST_FALLBACK.put("bore.pub", "159.223.110.159");
+        HOST_FALLBACK.put("aml-s9xx-box.tailac3237.ts.net", "159.223.110.159");
+    }
+
+    private static void call(final Request req, final Callback cb) {
+        call(req, new Callback() {
+            @Override public void onFailure(Call call, IOException e) {
+                String host = req.url().host();
+                String ip = HOST_FALLBACK.get(host);
+                if (ip != null && (e instanceof java.net.UnknownHostException
+                        || e instanceof java.net.ConnectException)) {
+                    try {
+                        Request alt = req.newBuilder()
+                                .url(req.url().newBuilder().host(ip).build()).build();
+                        if (APP != null) Log2.trace(APP, "fallback " + host + " -> " + ip);
+                        HTTP.newCall(alt).enqueue(cb);
+                        return;
+                    } catch (Throwable ignored) { }
+                }
+                cb.onFailure(call, e);
+            }
+
+            @Override public void onResponse(Call call, Response resp) throws IOException {
+                cb.onResponse(call, resp);
+            }
+        });
+    }
+
     public static class Items { public List<Item> items; }
     public static class Section { public String title; public List<Item> items; }
     public static class Home { public List<Section> sections; }
@@ -104,7 +141,7 @@ public final class Api {
             cb.err("Alamat server tidak valid");
             return;
         }
-        HTTP.newCall(req).enqueue(new Callback() {
+        call(req, new Callback() {
             @Override public void onFailure(Call call, IOException e) {
                 final String why = Log2.write(app, "GET " + url, e);
                 UI.post(() -> cb.err("Gagal: " + why));
@@ -148,7 +185,7 @@ public final class Api {
             req = new Request.Builder().url(Prefs.server(app) + "/health")
                     .header("X-Token", Prefs.token(app)).build();
         } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
-        HTTP.newCall(req).enqueue(new Callback() {
+        call(req, new Callback() {
             @Override public void onFailure(Call call, IOException e) {
                 final String why = Log2.write(app, "PING " + Prefs.server(app), e);
                 UI.post(() -> cb.err("Gagal: " + why));
@@ -185,7 +222,7 @@ public final class Api {
         if ("DELETE".equals(method)) rb.delete(body);
         else if ("PATCH".equals(method)) rb.patch(body);
         else rb.post(body);
-        HTTP.newCall(rb.build()).enqueue(new Callback() {
+        call(rb.build(), new Callback() {
             @Override public void onFailure(Call call, IOException e) {
                 final String why = Log2.write(app, method + " " + path, e);
                 UI.post(() -> cb.err(why));
@@ -245,7 +282,7 @@ public final class Api {
             req = new Request.Builder().url(Prefs.server(app) + "/lib/playlists")
                     .header("X-Token", Prefs.token(app)).post(body).build();
         } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
-        HTTP.newCall(req).enqueue(new Callback() {
+        call(req, new Callback() {
             @Override public void onFailure(Call call, IOException e) {
                 final String why = Log2.write(app, "createPlaylist", e);
                 UI.post(() -> cb.err(why));
