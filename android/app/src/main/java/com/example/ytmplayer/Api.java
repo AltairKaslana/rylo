@@ -42,10 +42,14 @@ public final class Api {
     public static void attach(Context c) { APP = c.getApplicationContext(); }
 
     /** Host publik -> alamat cadangan (HTTP polos) untuk HP yang TLS-nya tidak sanggup. */
-    private static final java.util.Map<String, String> PLAIN_FALLBACK = new java.util.HashMap<>();
+    /**
+     * Jalur cadangan TLS: stunnel di box memakai sertifikat RSA sendiri (dipin di Net.java).
+     * Dipakai bila HTTPS Cloudflare gagal karena HP lama tidak mendukung cipher ECDSA.
+     */
+    private static final java.util.Map<String, String> TLS_FALLBACK = new java.util.HashMap<>();
     static {
-        PLAIN_FALLBACK.put("musik.altairk.my.id", "http://159.223.110.159:24190");
-        PLAIN_FALLBACK.put("bore.pub", "http://159.223.110.159:24190");
+        TLS_FALLBACK.put("musik.altairk.my.id", "https://bore.pub:24191");
+        TLS_FALLBACK.put("bore.pub", "https://bore.pub:24191");
     }
 
     private static boolean tlsTrouble(IOException e) {
@@ -56,24 +60,21 @@ public final class Api {
         return false;
     }
 
-    /**
-     * Jalankan permintaan. Bila gagal karena TLS/DNS, ulangi sekali ke alamat HTTP cadangan
-     * (bore) supaya perangkat lama tetap bisa memutar musik.
-     */
+    /** Jalankan permintaan; bila TLS gagal, ulangi sekali ke jalur TLS cadangan (sertifikat kita). */
     private static void call(final Request req, final Callback cb) {
         HTTP.newCall(req).enqueue(new Callback() {
             @Override public void onFailure(Call call, IOException e) {
                 String host = req.url().host();
-                String alt = PLAIN_FALLBACK.get(host);
+                String alt = TLS_FALLBACK.get(host);
                 if (alt != null && tlsTrouble(e)) {
                     try {
-                        String base = alt.endsWith("/") ? alt.substring(0, alt.length() - 1) : alt;
-                        String path = req.url().encodedPath();
-                        String query = req.url().encodedQuery();
-                        String url = base + path + (query == null ? "" : "?" + query);
+                        java.net.URI a = java.net.URI.create(alt);
+                        String base = a.getScheme() + "://" + a.getAuthority();
+                        String url = base + req.url().encodedPath()
+                                + (req.url().encodedQuery() == null ? "" : "?" + req.url().encodedQuery());
                         Request r2 = req.newBuilder().url(url).build();
-                        if (APP != null) Log2.trace(APP, "plain fallback " + host + " -> " + url);
-                        Prefs.setPlainMode(APP, true);   // audio juga ikut jalur HTTP
+                        if (APP != null) Log2.trace(APP, "tls fallback " + host + " -> " + url);
+                        Prefs.setAltTls(APP, true);   // audio & cover ikut jalur ini
                         HTTP.newCall(r2).enqueue(cb);
                         return;
                     } catch (Throwable ignored) { }
@@ -118,8 +119,8 @@ public final class Api {
     /** Alamat audio. Kalau perangkat sudah pernah gagal TLS, langsung pakai jalur HTTP cadangan. */
     public static String stream(Context c, String id) {
         String srv = Prefs.server(c);
-        String plain = PLAIN_FALLBACK.get(java.net.URI.create(srv).getHost());
-        if (plain != null && Prefs.plainMode(c)) srv = plain;
+        String plain = TLS_FALLBACK.get(java.net.URI.create(srv).getHost());
+        if (plain != null && Prefs.altTls(c)) srv = plain;
         return srv + "/stream/" + id + "?t=" + enc(Prefs.token(c));
     }
 
@@ -127,8 +128,8 @@ public final class Api {
         if (url == null || url.isEmpty()) return null;
         int s = px <= 200 ? 200 : (px <= 300 ? 300 : 500);
         String srv = Prefs.server(c);
-        String plain = PLAIN_FALLBACK.get(java.net.URI.create(srv).getHost());
-        if (plain != null && Prefs.plainMode(c)) srv = plain;
+        String plain = TLS_FALLBACK.get(java.net.URI.create(srv).getHost());
+        if (plain != null && Prefs.altTls(c)) srv = plain;
         return srv + "/img?s=" + s + "&t=" + enc(Prefs.token(c)) + "&u=" + enc(url);
     }
 

@@ -29,11 +29,11 @@ public final class Prefs {
 
     public static boolean ready(Context c) { return !server(c).isEmpty() && !token(c).isEmpty(); }
 
-    /** True kalau perangkat ini perlu jalur HTTP polos (TLS tidak didukung). */
-    public static boolean plainMode(Context c) { return sp(c).getBoolean("plain", false); }
+    /** True kalau perangkat ini perlu jalur TLS cadangan (sertifikat RSA kita sendiri). */
+    public static boolean altTls(Context c) { return sp(c).getBoolean("alt_tls", false); }
 
-    public static void setPlainMode(Context c, boolean on) {
-        sp(c).edit().putBoolean("plain", on).apply();
+    public static void setAltTls(Context c, boolean on) {
+        sp(c).edit().putBoolean("alt_tls", on).apply();
     }
 
     public static void save(Context c, String server, String token) {
