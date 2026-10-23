@@ -13,6 +13,7 @@ import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.SystemClock;
+import android.widget.RemoteViews;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
@@ -93,7 +94,7 @@ public class PlaybackService extends Service implements Playback.Listener {
 
     private void handleKey(int code) {
         long now = SystemClock.uptimeMillis();
-        if (code == lastKey && now - lastAct < 700) {
+        if (code == lastKey && now - lastAct < 1500) {
             Log2.trace(this, "aksi ganda diabaikan key=" + code);
             return;
         }
@@ -103,7 +104,10 @@ public class PlaybackService extends Service implements Playback.Listener {
             switch (code) {
                 case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
                 case KeyEvent.KEYCODE_HEADSETHOOK:
-                    pb.toggle(); break;
+                    pb.toggle();
+                    Log2.trace(this, "toggle -> playWhenReady=" + pb.player.getPlayWhenReady()
+                            + " state=" + pb.player.getPlaybackState());
+                    break;
                 case KeyEvent.KEYCODE_MEDIA_PLAY:
                     if (!pb.active()) pb.toggle(); break;
                 case KeyEvent.KEYCODE_MEDIA_PAUSE:
@@ -194,26 +198,10 @@ public class PlaybackService extends Service implements Playback.Listener {
 
     private PendingIntent act(String action) {
         int f = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
-        Intent i = new Intent(this, ActionReceiver.class);
-        i.setAction("ytm.act." + action);   // aksi harus unik agar tiap tombol punya PendingIntent sendiri
-        i.putExtra("a", action);
-        return PendingIntent.getBroadcast(this, action.hashCode(), i, f);
-    }
-
-    /**
-     * Tombol notifikasi dikirim sebagai tombol media ke MediaSession.
-     * Ini jalur yang SAMA dengan tombol lockscreen/headset yang sudah terbukti bekerja di
-     * perangkat ini. PendingIntent broadcast biasa diabaikan sebagian ROM lama.
-     */
-    private PendingIntent mediaKey(int keyCode) {
-        if (session == null) return act(A_TOGGLE);
-        try {
-            return androidx.media.session.MediaButtonReceiver.buildMediaButtonPendingIntent(
-                    this, new ComponentName(this, androidx.media.session.MediaButtonReceiver.class),
-                    keyCode);
-        } catch (Throwable t) {
-            return act(keyCode == KeyEvent.KEYCODE_MEDIA_NEXT ? A_NEXT : A_PREV);
-        }
+        // Langsung ke service: satu lompatan saja, tanpa BroadcastReceiver di tengah.
+        Intent i = new Intent(this, PlaybackService.class);
+        i.setAction("ytm.act." + action);
+        return PendingIntent.getService(this, action.hashCode(), i, f);
     }
 
     private Notification build() {
@@ -223,9 +211,27 @@ public class PlaybackService extends Service implements Playback.Listener {
         int f = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
         PendingIntent open = PendingIntent.getActivity(this, 0,
                 new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), f);
+
+        // --- Notifikasi dengan tombol nyata (RemoteViews) ---
+        // Template aksi standar diabaikan sebagian ROM lama; RemoteViews memastikan tombol
+        // benar-benar ada di layar dan bisa diklik. Klik langsung ke service, tanpa perantara.
+        RemoteViews rv = new RemoteViews(getPackageName(), R.layout.notif);
+        rv.setTextViewText(R.id.n_title, it != null ? it.title : "Memuat…");
+        rv.setTextViewText(R.id.n_sub, it != null ? it.subtitle : "");
+        rv.setImageViewResource(R.id.n_toggle, playing ? R.drawable.ic_n_pause : R.drawable.ic_n_play);
+        rv.setContentDescription(R.id.n_toggle, playing ? "Jeda" : "Putar");
+        if (art != null) rv.setImageViewBitmap(R.id.n_art, art);
+        else rv.setImageViewResource(R.id.n_art, R.drawable.ic_notif);
+
+        rv.setOnClickPendingIntent(R.id.n_prev, act(A_PREV));
+        rv.setOnClickPendingIntent(R.id.n_toggle, act(A_TOGGLE));
+        rv.setOnClickPendingIntent(R.id.n_next, act(A_NEXT));
+        rv.setOnClickPendingIntent(R.id.n_title, open);
+        rv.setOnClickPendingIntent(R.id.n_sub, open);
+
         NotificationCompat.Builder b = new NotificationCompat.Builder(this, CH)
                 .setSmallIcon(R.drawable.ic_notif)
-                .setContentTitle(it != null ? it.title : "Memuat...")
+                .setContentTitle(it != null ? it.title : "Memuat…")
                 .setContentText(it != null ? it.subtitle : "")
                 .setLargeIcon(art)
                 .setContentIntent(open)
@@ -233,18 +239,24 @@ public class PlaybackService extends Service implements Playback.Listener {
                 .setShowWhen(false)
                 .setOngoing(playing)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .addAction(R.drawable.ic_n_prev, "Sebelumnya",
-                        mediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS))
+                .addAction(R.drawable.ic_n_prev, "Sebelumnya", act(A_PREV))
                 .addAction(playing ? R.drawable.ic_n_pause : R.drawable.ic_n_play,
-                        playing ? "Jeda" : "Putar", mediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
-                .addAction(R.drawable.ic_n_next, "Berikutnya",
-                        mediaKey(KeyEvent.KEYCODE_MEDIA_NEXT));
+                        playing ? "Jeda" : "Putar", act(A_TOGGLE))
+                .addAction(R.drawable.ic_n_next, "Berikutnya", act(A_NEXT));
+
         if (session != null) {
             b.setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
                     .setMediaSession(session.getSessionToken())
                     .setShowActionsInCompactView(0, 1, 2)
                     .setShowCancelButton(true)
                     .setCancelButtonIntent(act(A_STOP)));
+        }
+        // KitKat: pakai RemoteViews sebagai isi notifikasi. Android N+: template + aksi standar.
+        if (Build.VERSION.SDK_INT < 24) {
+            b.setContent(rv);
+        } else {
+            b.setStyle(new NotificationCompat.DecoratedCustomViewStyle())
+                    .setCustomContentView(rv);
         }
         return b.build();
     }

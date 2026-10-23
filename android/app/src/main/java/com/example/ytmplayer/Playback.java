@@ -174,7 +174,9 @@ public final class Playback {
     }
 
     private void toggleInner() {
-        if (player.isPlaying()) { player.pause(); return; }
+        // Pakai playWhenReady (niat pengguna), BUKAN isPlaying(): saat buffering isPlaying()
+        // masih false sehingga tombol "Jeda" tidak bisa menjeda sama sekali.
+        if (player.getPlayWhenReady()) { player.pause(); return; }
         int s = player.getPlaybackState();
         if (s == Player.STATE_IDLE) player.prepare();
         else if (s == Player.STATE_ENDED) player.seekToDefaultPosition(0);
