@@ -100,6 +100,7 @@ public class PlaybackService extends Service implements Playback.Listener {
             else if (A_NEXT.equals(a)) pb.next();
             else if (A_PREV.equals(a)) pb.prev();
             else if (A_STOP.equals(a)) pb.stop();
+            else if ("ytm.refresh".equals(a)) safeForeground();
             else safeForeground();
             if (pb.hasQueue()) safeForeground();
         } catch (Throwable t) {
@@ -117,6 +118,10 @@ public class PlaybackService extends Service implements Playback.Listener {
 
     @Override public void onChange() {
         try { refresh(); } catch (Throwable ignored) { }
+    }
+
+    private void refreshNotif() {
+        try { nm.notify(ID, build()); } catch (Throwable ignored) { }
     }
 
     private void refresh() {
