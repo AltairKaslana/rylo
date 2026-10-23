@@ -34,7 +34,8 @@ public class PlaybackService extends Service implements Playback.Listener {
     private static final String CH = "playback";
     private static final int ID = 1;
     private static final String A_TOGGLE = "ytm.toggle", A_NEXT = "ytm.next",
-            A_PREV = "ytm.prev", A_STOP = "ytm.stop";
+            A_PREV = "ytm.prev", A_STOP = "ytm.stop",
+            A_PLAY = "ytm.play", A_PAUSE = "ytm.pause";
 
     private Playback pb;
     private MediaSessionCompat session;
@@ -94,7 +95,7 @@ public class PlaybackService extends Service implements Playback.Listener {
 
     private void handleKey(int code) {
         long now = SystemClock.uptimeMillis();
-        if (code == lastKey && now - lastAct < 1500) {
+        if (code == lastKey && now - lastAct < 400) {
             Log2.trace(this, "aksi ganda diabaikan key=" + code);
             return;
         }
@@ -109,9 +110,9 @@ public class PlaybackService extends Service implements Playback.Listener {
                             + " state=" + pb.player.getPlaybackState());
                     break;
                 case KeyEvent.KEYCODE_MEDIA_PLAY:
-                    if (!pb.active()) pb.toggle(); break;
+                    doPlay(); break;
                 case KeyEvent.KEYCODE_MEDIA_PAUSE:
-                    if (pb.active()) pb.toggle(); break;
+                    doPause(); break;
                 case KeyEvent.KEYCODE_MEDIA_NEXT:
                     pb.next(); break;
                 case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
@@ -123,6 +124,23 @@ public class PlaybackService extends Service implements Playback.Listener {
         } catch (Throwable t) {
             Log2.write(this, "handleKey " + code, t);
         }
+    }
+
+    /** Perintah tegas: aman dipanggil berulang kali (tidak membalik keadaan). */
+    private void doPause() {
+        if (pb.player.getPlayWhenReady()) pb.player.pause();
+        Log2.trace(this, "pause -> playWhenReady=" + pb.player.getPlayWhenReady()
+                + " state=" + pb.player.getPlaybackState());
+    }
+
+    private void doPlay() {
+        int st = pb.player.getPlaybackState();
+        if (st == com.google.android.exoplayer2.Player.STATE_IDLE) pb.player.prepare();
+        else if (st == com.google.android.exoplayer2.Player.STATE_ENDED)
+            pb.player.seekToDefaultPosition(0);
+        pb.player.play();
+        Log2.trace(this, "play -> playWhenReady=" + pb.player.getPlayWhenReady()
+                + " state=" + pb.player.getPlaybackState());
     }
 
     @Override public int onStartCommand(Intent i, int flags, int startId) {
@@ -137,6 +155,8 @@ public class PlaybackService extends Service implements Playback.Listener {
                 }
             }
             else if (A_TOGGLE.equals(a)) { Log2.trace(this, "notif-tombol toggle"); handleKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE); }
+            else if (A_PLAY.equals(a))  { Log2.trace(this, "notif-tombol play");  doPlay(); }
+            else if (A_PAUSE.equals(a)) { Log2.trace(this, "notif-tombol pause"); doPause(); }
             else if (A_NEXT.equals(a))   { Log2.trace(this, "notif-tombol next");   handleKey(KeyEvent.KEYCODE_MEDIA_NEXT); }
             else if (A_PREV.equals(a))   { Log2.trace(this, "notif-tombol prev");   handleKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS); }
             else if (A_STOP.equals(a))   { Log2.trace(this, "notif-tombol stop");   handleKey(KeyEvent.KEYCODE_MEDIA_STOP); }
@@ -220,11 +240,14 @@ public class PlaybackService extends Service implements Playback.Listener {
         rv.setTextViewText(R.id.n_sub, it != null ? it.subtitle : "");
         rv.setImageViewResource(R.id.n_toggle, playing ? R.drawable.ic_n_pause : R.drawable.ic_n_play);
         rv.setContentDescription(R.id.n_toggle, playing ? "Jeda" : "Putar");
+        // Perintah tegas (jeda/putar), bukan "balikkan keadaan": kalau perintah terkirim
+        // dua kali, hasilnya tetap sama. Inilah yang membuat tombol butuh 2 ketukan.
+        PendingIntent togglePI = act(playing ? A_PAUSE : A_PLAY);
         if (art != null) rv.setImageViewBitmap(R.id.n_art, art);
         else rv.setImageViewResource(R.id.n_art, R.drawable.ic_notif);
 
         rv.setOnClickPendingIntent(R.id.n_prev, act(A_PREV));
-        rv.setOnClickPendingIntent(R.id.n_toggle, act(A_TOGGLE));
+        rv.setOnClickPendingIntent(R.id.n_toggle, togglePI);
         rv.setOnClickPendingIntent(R.id.n_next, act(A_NEXT));
         rv.setOnClickPendingIntent(R.id.n_title, open);
         rv.setOnClickPendingIntent(R.id.n_sub, open);
@@ -241,7 +264,7 @@ public class PlaybackService extends Service implements Playback.Listener {
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .addAction(R.drawable.ic_n_prev, "Sebelumnya", act(A_PREV))
                 .addAction(playing ? R.drawable.ic_n_pause : R.drawable.ic_n_play,
-                        playing ? "Jeda" : "Putar", act(A_TOGGLE))
+                        playing ? "Jeda" : "Putar", togglePI)
                 .addAction(R.drawable.ic_n_next, "Berikutnya", act(A_NEXT));
 
         if (session != null) {
