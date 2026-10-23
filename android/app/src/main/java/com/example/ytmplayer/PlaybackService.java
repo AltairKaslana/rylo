@@ -208,8 +208,9 @@ public class PlaybackService extends Service implements Playback.Listener {
     private PendingIntent mediaKey(int keyCode) {
         if (session == null) return act(A_TOGGLE);
         try {
-            return androidx.media.session.MediaButtonReceiver
-                    .buildMediaButtonPendingIntent(session, keyCode);
+            return androidx.media.session.MediaButtonReceiver.buildMediaButtonPendingIntent(
+                    this, new ComponentName(this, androidx.media.session.MediaButtonReceiver.class),
+                    keyCode);
         } catch (Throwable t) {
             return act(keyCode == KeyEvent.KEYCODE_MEDIA_NEXT ? A_NEXT : A_PREV);
         }
