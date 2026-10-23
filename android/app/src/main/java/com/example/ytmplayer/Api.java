@@ -241,7 +241,7 @@ public final class Api {
                 try {
                     final String body = resp.body().string();
                     if (!resp.isSuccessful()) {
-                        String msg = "Server " + resp.code();
+                        String msg = "Server merespons " + resp.code();
                         try {
                             JsonObject o = JsonParser.parseString(body).getAsJsonObject();
                             if (o.has("detail")) msg += ": " + o.get("detail").getAsString();
@@ -287,7 +287,7 @@ public final class Api {
                 UI.post(() -> {
                     if (code == 200) cb.ok("Tersambung");
                     else if (code == 401) cb.err("PIN salah");
-                    else cb.err("Server " + code);
+                    else cb.err("Server merespons " + code);
                 });
             }
         });
@@ -327,7 +327,7 @@ public final class Api {
                     if (code >= 200 && code < 300) {
                         Ok o = new Ok(); o.ok = true; o.fav = true; cb.ok(o);
                     } else {
-                        cb.err("Server " + code);
+                        cb.err("Server merespons " + code);
                     }
                 });
             }
@@ -402,7 +402,7 @@ public final class Api {
                     final Item it = GSON.fromJson(text, Item.class);
                     UI.post(() -> cb.ok(it));
                 } else {
-                    UI.post(() -> cb.err("Server " + code));
+                    UI.post(() -> cb.err("Server merespons " + code));
                 }
             }
         });

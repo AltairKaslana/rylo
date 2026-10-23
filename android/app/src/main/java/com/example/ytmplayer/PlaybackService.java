@@ -12,6 +12,7 @@ import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.SystemClock;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
@@ -64,45 +65,80 @@ public class PlaybackService extends Service implements Playback.Listener {
         }
         if (session != null) {
             session.setCallback(new MediaSessionCompat.Callback() {
-                @Override public void onPlay() { if (!pb.player.getPlayWhenReady()) pb.toggle(); }
+                @Override public void onPlay() { if (!pb.active()) pb.toggle(); }
                 @Override public void onPause() { pb.player.pause(); }
                 @Override public void onSkipToNext() { pb.next(); }
                 @Override public void onSkipToPrevious() { pb.prev(); }
                 @Override public void onSeekTo(long p) { pb.player.seekTo(p); }
                 @Override public void onStop() { pb.stop(); }
+
+                /** Semua tombol media (notifikasi, lockscreen, headset) masuk lewat sini. */
+                @Override public boolean onMediaButtonEvent(Intent ev) {
+                    KeyEvent k = ev == null ? null
+                            : (KeyEvent) ev.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
+                    if (k == null || k.getAction() != KeyEvent.ACTION_DOWN) return false;
+                    Log2.trace(PlaybackService.this, "notif-key " + k.getKeyCode());
+                    handleKey(k.getKeyCode());
+                    return true;    // sudah ditangani, jangan diteruskan lagi (cegah dobel aksi)
+                }
             });
             try { session.setActive(true); } catch (Throwable ignored) { }
         }
         pb.addListener(this);
     }
 
+    /** Waktu aksi terakhir: satu ketukan tidak boleh menghasilkan dua aksi. */
+    private long lastAct = 0;
+    private int lastKey = -1;
+
+    private void handleKey(int code) {
+        long now = SystemClock.uptimeMillis();
+        if (code == lastKey && now - lastAct < 700) {
+            Log2.trace(this, "aksi ganda diabaikan key=" + code);
+            return;
+        }
+        lastAct = now;
+        lastKey = code;
+        try {
+            switch (code) {
+                case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                case KeyEvent.KEYCODE_HEADSETHOOK:
+                    pb.toggle(); break;
+                case KeyEvent.KEYCODE_MEDIA_PLAY:
+                    if (!pb.active()) pb.toggle(); break;
+                case KeyEvent.KEYCODE_MEDIA_PAUSE:
+                    if (pb.active()) pb.toggle(); break;
+                case KeyEvent.KEYCODE_MEDIA_NEXT:
+                    pb.next(); break;
+                case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+                    pb.prev(); break;
+                case KeyEvent.KEYCODE_MEDIA_STOP:
+                    pb.stop(); break;
+                default: break;
+            }
+        } catch (Throwable t) {
+            Log2.write(this, "handleKey " + code, t);
+        }
+    }
+
     @Override public int onStartCommand(Intent i, int flags, int startId) {
         String a = i == null ? null : i.getAction();
         if (a != null && a.startsWith("ytm.act.")) a = a.substring("ytm.act.".length());
         try {
-            Log2.trace(this, "action=" + a);
             if (Intent.ACTION_MEDIA_BUTTON.equals(a)) {
                 KeyEvent ev = (KeyEvent) i.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
                 if (ev != null && ev.getAction() == KeyEvent.ACTION_DOWN) {
-                    switch (ev.getKeyCode()) {
-                        case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
-                        case KeyEvent.KEYCODE_HEADSETHOOK: pb.toggle(); break;
-                        case KeyEvent.KEYCODE_MEDIA_PLAY: if (!pb.active()) pb.toggle(); break;
-                        case KeyEvent.KEYCODE_MEDIA_PAUSE: if (pb.active()) pb.toggle(); break;
-                        case KeyEvent.KEYCODE_MEDIA_NEXT: pb.next(); break;
-                        case KeyEvent.KEYCODE_MEDIA_PREVIOUS: pb.prev(); break;
-                        case KeyEvent.KEYCODE_MEDIA_STOP: pb.stop(); break;
-                        default: break;
-                    }
+                    Log2.trace(this, "notif-key " + ev.getKeyCode());
+                    handleKey(ev.getKeyCode());
                 }
             }
-            else if (A_TOGGLE.equals(a)) pb.toggle();
-            else if (A_NEXT.equals(a)) pb.next();
-            else if (A_PREV.equals(a)) pb.prev();
-            else if (A_STOP.equals(a)) pb.stop();
-            else if ("ytm.refresh".equals(a)) safeForeground();
-            else safeForeground();
-            if (pb.hasQueue()) safeForeground();
+            else if (A_TOGGLE.equals(a)) { Log2.trace(this, "notif-tombol toggle"); handleKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE); }
+            else if (A_NEXT.equals(a))   { Log2.trace(this, "notif-tombol next");   handleKey(KeyEvent.KEYCODE_MEDIA_NEXT); }
+            else if (A_PREV.equals(a))   { Log2.trace(this, "notif-tombol prev");   handleKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS); }
+            else if (A_STOP.equals(a))   { Log2.trace(this, "notif-tombol stop");   handleKey(KeyEvent.KEYCODE_MEDIA_STOP); }
+            else if ("ytm.refresh".equals(a)) { /* cukup segarkan notifikasi */ }
+            else { Log2.trace(this, "action=" + a); }
+            safeForeground();
         } catch (Throwable t) {
             // jangan biarkan aksi notifikasi/lockscreen mematikan aplikasi
             Log2.write(this, "ACTION " + a, t);
@@ -164,6 +200,21 @@ public class PlaybackService extends Service implements Playback.Listener {
         return PendingIntent.getBroadcast(this, action.hashCode(), i, f);
     }
 
+    /**
+     * Tombol notifikasi dikirim sebagai tombol media ke MediaSession.
+     * Ini jalur yang SAMA dengan tombol lockscreen/headset yang sudah terbukti bekerja di
+     * perangkat ini. PendingIntent broadcast biasa diabaikan sebagian ROM lama.
+     */
+    private PendingIntent mediaKey(int keyCode) {
+        if (session == null) return act(A_TOGGLE);
+        try {
+            return androidx.media.session.MediaButtonReceiver
+                    .buildMediaButtonPendingIntent(session, keyCode);
+        } catch (Throwable t) {
+            return act(keyCode == KeyEvent.KEYCODE_MEDIA_NEXT ? A_NEXT : A_PREV);
+        }
+    }
+
     private Notification build() {
         Item it = pb.current();
         if (art != null && art.isRecycled()) art = null;
@@ -181,10 +232,12 @@ public class PlaybackService extends Service implements Playback.Listener {
                 .setShowWhen(false)
                 .setOngoing(playing)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .addAction(R.drawable.ic_n_prev, "Sebelumnya", act(A_PREV))
+                .addAction(R.drawable.ic_n_prev, "Sebelumnya",
+                        mediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS))
                 .addAction(playing ? R.drawable.ic_n_pause : R.drawable.ic_n_play,
-                        playing ? "Jeda" : "Putar", act(A_TOGGLE))
-                .addAction(R.drawable.ic_n_next, "Berikutnya", act(A_NEXT));
+                        playing ? "Jeda" : "Putar", mediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
+                .addAction(R.drawable.ic_n_next, "Berikutnya",
+                        mediaKey(KeyEvent.KEYCODE_MEDIA_NEXT));
         if (session != null) {
             b.setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
                     .setMediaSession(session.getSessionToken())

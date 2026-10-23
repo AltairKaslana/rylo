@@ -7,7 +7,7 @@
     <RelativeLayout android:layout_width="match_parent" android:layout_height="48dp">
         <TextView android:layout_width="wrap_content" android:layout_height="match_parent"
             android:gravity="center_vertical" android:paddingLeft="16dp"
-            android:text="Music" android:textColor="#FFFFFF" android:textSize="20sp"
+            android:text="Musik" android:textColor="#FFFFFF" android:textSize="20sp"
             android:textStyle="bold"/>
         <ImageView android:id="@+id/btn_settings" android:layout_width="48dp"
             android:layout_height="48dp" android:layout_alignParentRight="true"
