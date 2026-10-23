@@ -50,13 +50,16 @@ public final class Api {
         HOST_FALLBACK.put("musik.altairk.my.id", "104.21.17.5");
     }
 
+    /** Jalankan permintaan; kalau host tidak bisa di-resolve, ulangi sekali lewat IP cadangan. */
     private static void call(final Request req, final Callback cb) {
-        call(req, new Callback() {
+        HTTP.newCall(req).enqueue(new Callback() {
             @Override public void onFailure(Call call, IOException e) {
                 String host = req.url().host();
                 String ip = HOST_FALLBACK.get(host);
-                if (ip != null && (e instanceof java.net.UnknownHostException
-                        || e instanceof java.net.ConnectException)) {
+                boolean dnsFail = e instanceof java.net.UnknownHostException
+                        || e instanceof java.net.ConnectException
+                        || e instanceof java.net.SocketTimeoutException;
+                if (ip != null && dnsFail) {
                     try {
                         Request alt = req.newBuilder()
                                 .url(req.url().newBuilder().host(ip).build()).build();
