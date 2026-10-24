@@ -161,6 +161,14 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
         box.addView(s);
         box.addView(t);
 
+        // Profil perangkat: favorit, playlist, dan riwayat di server disimpan per profil.
+        // Nilai ini dibuat acak sekali saat aplikasi pertama dipasang, jadi menghapus
+        // aplikasi (uninstall) membuatnya baru dan data lama seolah hilang. Karena itu
+        // profil ditampilkan dan bisa ditulis ulang - setelah memasang ulang, ketik lagi
+        // profil yang sama untuk mengambil kembali data.
+        final EditText pf = field("Profil perangkat", Prefs.profile(this));
+        box.addView(pf);
+
         final TextView status = new TextView(this);
         status.setTextSize(12);
         status.setTextColor(0xFF9AA0A6);
@@ -174,11 +182,17 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
                 .setPositiveButton("Simpan", (d, w) -> {
                     String srv = s.getText().toString().trim();
                     String pin = t.getText().toString().trim();
+                    String prof = pf.getText().toString().trim();
                     if (srv.isEmpty() || pin.isEmpty()) {
                         toast("Alamat dan PIN belum lengkap");
                         return;
                     }
+                    if (prof.isEmpty()) {
+                        toast("Profil perangkat tidak boleh kosong");
+                        return;
+                    }
                     Prefs.save(this, srv, pin);
+                    Prefs.setProfile(this, prof);
                     Api.clearCache();
                     Api.ping(this, new Api.Cb<String>() {
                         @Override public void ok(String r) { toast(r); select(tab < 0 ? 0 : tab); }

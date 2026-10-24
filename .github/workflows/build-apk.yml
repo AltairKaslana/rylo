@@ -34,18 +34,49 @@ jobs:
         with:
           gradle-version: '7.5'
 
-      - name: Build debug APK
+      - name: Build unsigned APK
         working-directory: android
-        run: gradle assembleDebug --no-daemon --stacktrace
+        # Tanpa signingConfig, AGP menghasilkan app-release-unsigned.apk.
+        # Sengapa BUKAN assembleDebug: build debug memakai ~/.android/debug.keystore
+        # yang dibuat acak di setiap runner, jadi setiap build punya tanda tangan
+        # berbeda dan pemasangan di atas versi lama selalu gagal.
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Sign APK with the release keystore
+        env:
+          KS: ${{ runner.temp }}/ytm-release.jks
+        run: |
+          set -e
+          # Keystore & sandi datang dari rahasia repo, tidak pernah masuk kode.
+          printf '%s' "${{ secrets.YTM_KEYSTORE_BASE64 }}" | base64 -d > "$KS"
+          APK_UNSIGNED="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          APK_SIGNED="android/app/build/outputs/apk/release/app-release.apk"
+          "$ANDROID_HOME/build-tools/33.0.2/zipalign" -p -f 4 "$APK_UNSIGNED" "$APK_SIGNED"
+          "$ANDROID_HOME/build-tools/33.0.2/apksigner" sign \
+            --ks "$KS" \
+            --ks-key-alias "${{ secrets.YTM_KEY_ALIAS }}" \
+            --ks-pass "pass:${{ secrets.YTM_KEYSTORE_PASSWORD }}" \
+            --key-pass "pass:${{ secrets.YTM_KEY_PASSWORD }}" \
+            --min-sdk-version 19 --max-sdk-version 33 \
+            "$APK_SIGNED"
+          rm -f "$KS"
+
+      - name: Verify signature scheme
+        run: |
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          "$ANDROID_HOME/build-tools/33.0.2/apksigner" verify --min-sdk-version 19 --max-sdk-version 33 --print-certs "$APK" | head -8
+          # Sidik jari sertifikat harus SAMA di setiap build; kalau berubah, tanda
+          # tangan tidak lagi stabil dan pemasangan di atas versi lama akan gagal lagi.
+          echo "CERT_SHA256=$("$ANDROID_HOME/build-tools/33.0.2/apksigner" verify --print-certs "$APK" | grep -o 'SHA-256 digest:.*' | head -1)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Show APK info
         run: |
-          ls -lh android/app/build/outputs/apk/debug/
-          "$ANDROID_HOME/build-tools/33.0.2/aapt2" dump badging android/app/build/outputs/apk/debug/app-debug.apk | head -6
+          ls -lh android/app/build/outputs/apk/release/
+          "$ANDROID_HOME/build-tools/33.0.2/aapt2" dump badging android/app/build/outputs/apk/release/app-release.apk | head -6
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ytm-player-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: ytm-player-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error

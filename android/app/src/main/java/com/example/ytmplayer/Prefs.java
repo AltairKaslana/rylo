@@ -15,7 +15,15 @@ public final class Prefs {
 
     public static String server(Context c) { return sp(c).getString("server", ""); }
 
-    /** Profil perangkat: dibuat sekali, dipakai sebagai header X-Profile. */
+    /**
+     * Profil perangkat: dibuat sekali, dipakai sebagai header X-Profile.
+     *
+     * PENTING: nilai ini menentukan data mana yang terlihat di server (favorit, playlist,
+     * riwayat). Karena disimpan di SharedPreferences, menghapus aplikasi membuatnya baru
+     * dan data lama tidak lagi terlihat - bukan hilang, hanya tidak terhubung. Karena itu
+     * nilainya ditampilkan di dialog "Server relay" supaya bisa diketik ulang setelah
+     * memasang ulang.
+     */
     public static String profile(Context c) {
         String p = sp(c).getString("profile", "");
         if (p == null || p.isEmpty()) {
@@ -23,6 +31,19 @@ public final class Prefs {
             sp(c).edit().putString("profile", p).apply();
         }
         return p;
+    }
+
+    /**
+     * Ganti profil perangkat (mis. memulihkan profil lama setelah memasang ulang).
+     *
+     * Aturan bersihnya sama dengan `library.clean_profile()` di server: hanya
+     * [A-Za-z0-9_-], maksimal 40 karakter. Kalau dibiarkan berbeda, yang tersimpan di HP
+     * tidak sama dengan yang dipakai server - favorit seolah hilang tanpa sebab yang jelas.
+     */
+    public static void setProfile(Context c, String p) {
+        String v = p == null ? "" : p.trim().replaceAll("[^A-Za-z0-9_-]", "");
+        if (v.length() > 40) v = v.substring(0, 40);
+        if (!v.isEmpty()) sp(c).edit().putString("profile", v).apply();
     }
 
     public static String token(Context c) { return sp(c).getString("token", ""); }
