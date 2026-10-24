@@ -39,7 +39,9 @@ public class DetailFragment extends BaseFragment {
             if (!tracks.isEmpty())
                 Playback.get(requireContext()).play(tracks, new Random().nextInt(tracks.size()), true);
         });
-        rows = new Adapters.Rows((it, ctx) -> main().open(it, ctx));
+        // Album / playlist / artis memang koleksi yang disusun manusia: urutannya
+        // disengaja, jadi seluruh daftar diputar berurutan.
+        rows = new Adapters.Rows((it, ctx) -> main().open(it, ctx, true));
         rows.setLongPick((it, ctx) -> main().trackMenu(it, "", "", null));
         rows.setHeader(header);
         list.setAdapter(rows);

@@ -21,7 +21,9 @@ public class HomeFragment extends BaseFragment {
     }
 
     private void show(java.util.List<Api.Section> sections) {
-        Adapters.Sections a = new Adapters.Sections(sections, (it, ctx) -> main().open(it, ctx));
+        // Beranda (termasuk "Rekomendasi untukmu") adalah daftar penemuan, bukan koleksi
+        // yang disusun pengguna: putar lagu yang diketuk, lanjutannya dari radio lagu itu.
+        Adapters.Sections a = new Adapters.Sections(sections, (it, ctx) -> main().open(it, ctx, false));
         a.setLongPick((it, ctx) -> main().trackMenu(it, "", "", null));
         list.setAdapter(a);
     }

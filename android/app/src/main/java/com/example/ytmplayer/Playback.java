@@ -41,6 +41,8 @@ public final class Playback {
     private final Handler main = new Handler(Looper.getMainLooper());
     private boolean loadingRadio;
     private int errors;
+    /** Daftar asal saat mode "satu lagu" - cadangan kalau radio gagal. */
+    private List<Item> fallback = new ArrayList<>();
 
     private Playback(Context app) {
         this.app = app;
@@ -103,10 +105,35 @@ public final class Playback {
         return new MediaItem.Builder().setUri(Api.stream(app, s.id)).setMediaId(s.id).build();
     }
 
+    /**
+     * Putar satu lagu, lalu lanjut dengan rekomendasi yang relevan dengan lagu itu.
+     *
+     * Kenapa ada: daftar penemuan (hasil pencarian, beranda) bukan urutan mendengar yang
+     * disusun pengguna. Memutar seluruhnya membuat lagu berikutnya cuma "sisa hasil
+     * pencarian" - mencari "spectrum ent" lalu memilih The Night We Met akan membuat
+     * semua lagu Spectrum Ent lain menyusul, padahal yang diinginkan justru lagu yang
+     * mirip: artis sama, genre sama, atau lagu yang sering diputar.
+     *
+     * Daftar asal tetap disimpan sebagai cadangan: kalau radio gagal (offline, server
+     * sibuk), lagu-lagu dari daftar itu yang dipakai supaya pemutaran tidak mati setelah
+     * satu lagu.
+     */
+    public void playOne(Item song, List<Item> from) {
+        List<Item> one = new ArrayList<>();
+        one.add(song);
+        play(one, 0, false);          // play() membersihkan fallback, jadi set setelahnya
+        // play() menjadwalkan onTrack() lewat Handler.post, jadi baris di bawah tetap
+        // berjalan sebelum radio pertama kali diminta.
+        fallback = from == null ? new ArrayList<Item>() : new ArrayList<Item>(from);
+    }
+
     /** Putar daftar mulai dari indeks tertentu (hanya item bertipe lagu yang masuk antrean). */
     public void play(List<Item> list, int startInList, boolean shuffle) {
         queue.clear();
         have.clear();
+        // antrean baru berarti daftar cadangan lama tidak berlaku lagi - kalau tidak
+        // dibersihkan, sisa hasil pencarian sebelumnya bisa menyusul setelah sebuah album.
+        fallback.clear();
         List<MediaItem> mis = new ArrayList<>();
         int start = -1;
         for (int i = 0; i < list.size(); i++) {
@@ -148,11 +175,22 @@ public final class Playback {
         Api.radio(app, cur.id, new Api.Cb<Api.Items>() {
             @Override public void ok(Api.Items r) {
                 loadingRadio = false;
-                if (r.items != null) append(r.items);
+                if (r.items != null && !r.items.isEmpty()) append(r.items);
+                else appendFallback();          // radio kosong -> pakai daftar asal
             }
 
-            @Override public void err(String m) { loadingRadio = false; }
+            @Override public void err(String m) {
+                loadingRadio = false;
+                appendFallback();               // radio gagal -> jangan mati di satu lagu
+            }
         });
+    }
+
+    /** Cadangan: sisa daftar asal yang belum masuk antrean. */
+    private void appendFallback() {
+        if (fallback.isEmpty()) return;
+        append(fallback);
+        fallback.clear();          // sekali pakai: kalau masih kosong, jangan diulang
     }
 
     private void append(List<Item> songs) {
@@ -211,6 +249,7 @@ public final class Playback {
         player.clearMediaItems();
         queue.clear();
         have.clear();
+        fallback.clear();
         fire();
     }
 

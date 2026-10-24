@@ -80,7 +80,10 @@ public class SearchFragment extends BaseFragment {
         rows = new Adapters.Rows((it, ctx) -> {
             // ingat lagu yang dipilih agar pencarian terakhir bisa langsung memutarnya
             Api.rememberSearch(requireContext(), q.getText().toString().trim(), KINDS[sel], it);
-            main().open(it, ctx);
+            // Hasil pencarian BUKAN urutan mendengar: memutar seluruhnya membuat lagu
+            // berikutnya cuma sisa kata kunci pencarian. Putar yang dipilih saja,
+            // lanjutannya dari rekomendasi yang relevan dengan lagu itu.
+            main().open(it, ctx, false);
         });
         rows.setLongPick((it, ctx) -> main().trackMenu(it, "", "", null));
         list.setAdapter(rows);
@@ -172,7 +175,7 @@ public class SearchFragment extends BaseFragment {
                 (rec, it) -> {               // ketuk lagu -> putar
                     java.util.List<Item> ctx = new java.util.ArrayList<>();
                     ctx.add(it);
-                    main().open(it, ctx);
+                    main().open(it, ctx, false);
                 },
                 (rec, it) -> {               // silang -> hapus lagu ini dari riwayat
                     Api.forgetSearchItem(requireContext(), rec.query, it.id);

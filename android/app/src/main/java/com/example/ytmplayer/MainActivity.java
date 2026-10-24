@@ -96,11 +96,23 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
         for (int i = 0; i < 3; i++) tabs[i].setAlpha(i == tab ? 1f : 0.55f);
     }
 
-    /** Dipanggil fragment: lagu -> putar dengan daftar sebagai antrean; lainnya -> buka halaman detail. */
-    public void open(Item it, List<Item> ctx) {
+    /**
+     * Dipanggil fragment: lagu -> putar; lainnya -> buka halaman detail.
+     *
+     * @param playAll true kalau ctx adalah koleksi yang sengaja disusun pengguna
+     *                (album, playlist, artis) sehingga memang harus diputar berurutan.
+     *                false untuk daftar penemuan (hasil pencarian, beranda) - di situ
+     *                yang diputar hanya lagu yang diketuk, lalu lanjutannya diisi dari
+     *                rekomendasi yang relevan dengan lagu itu.
+     */
+    public void open(Item it, List<Item> ctx, boolean playAll) {
         if (it.isSong()) {
-            int i = ctx.indexOf(it);
-            pb.play(ctx, Math.max(i, 0), false);
+            if (playAll) {
+                int i = ctx.indexOf(it);
+                pb.play(ctx, Math.max(i, 0), false);
+            } else {
+                pb.playOne(it, ctx);
+            }
         } else {
             getSupportFragmentManager().beginTransaction()
                     .replace(R.id.content, DetailFragment.make(it)).addToBackStack(null).commit();
