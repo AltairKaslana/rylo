@@ -209,7 +209,12 @@ def adopt(old_profile, username, master_ok):
         new = row["profile"]
         if old == new:
             return {"moved": 0, "profile": new}
-        moved = 0
+        # Hitung dulu supaya angka yang dilaporkan jujur, bukan cuma item playlist.
+        counts = {}
+        for tbl in ("favorites", "search_items", "searches", "history", "playlists"):
+            counts[tbl] = c.execute(
+                f"SELECT COUNT(*) FROM {tbl} WHERE profile=?", (old,)).fetchone()[0]
+
         # playlist: pindahkan induk lalu anak-anaknya, tanpa menduplikasi id
         c.execute("UPDATE OR IGNORE playlists SET profile=? WHERE profile=?", (new, old))
         for pl in c.execute("SELECT id FROM playlists WHERE profile=?", (new,)).fetchall():
@@ -221,11 +226,18 @@ def adopt(old_profile, username, master_ok):
                     "INSERT OR IGNORE INTO playlist_items (playlist_id,video_id,position,added_at)"
                     " VALUES (?,?,?,?)",
                     (pid, it["video_id"], it["position"], it["added_at"]))
-                moved += 1
+        items_moved = c.execute(
+            "SELECT COUNT(*) FROM playlist_items i JOIN playlists p ON p.id=i.playlist_id"
+            " WHERE p.profile=?", (new,)).fetchone()[0]
         c.execute("DELETE FROM playlists WHERE profile=?", (old,))
         for tbl in ("favorites", "search_items", "searches", "history"):
             c.execute(f"UPDATE OR IGNORE {tbl} SET profile=? WHERE profile=?", (new, old))
             c.execute(f"DELETE FROM {tbl} WHERE profile=?", (old,))
         c.execute("UPDATE OR IGNORE profiles SET id=? WHERE id=?", (new, old))
         c.execute("DELETE FROM profiles WHERE id=?", (old,))
-    return {"moved": moved, "profile": new}
+
+    total = sum(counts.values()) + items_moved
+    detail = {k: v for k, v in counts.items() if v}
+    if items_moved:
+        detail["playlist_items"] = items_moved
+    return {"moved": total, "detail": detail, "profile": new}

@@ -220,6 +220,7 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
                         @Override public void err(String m) { toast(m); }
                     });
                 })
+                .setNeutralButton("Adopsi profil lama", (w, w2) -> askAdopt())
                 .setNegativeButton("Batal", null)
                 .show();
     }
@@ -295,7 +296,44 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
         });
     }
 
-    public void toast(String m) {
+    /**
+     * Pindahkan data profil lama (mis. "hp-dce769") ke akun yang sedang masuk.
+     * Bisa dipanggil berulang untuk menggabungkan beberapa profil; data tidak
+     * pernah tertimpa, hanya ditambahkan.
+     */
+    private void askAdopt() {
+        final EditText in = new EditText(this);
+        in.setHint("Profil lama, mis. hp-dce769");
+        in.setInputType(InputType.TYPE_CLASS_TEXT);
+        int pad = Ui.dp(this, 16);
+        in.setPadding(pad, pad, pad, pad);
+        new AlertDialog.Builder(this)
+                .setTitle("Adopsi profil lama")
+                .setMessage("Data riwayat, pencarian, favorit, dan playlist dari profil lama "
+                        + "akan dipindahkan ke akun ini. Bisa diisi lebih dari satu kali.")
+                .setView(in)
+                .setPositiveButton("Pindahkan", (d, w) -> {
+                    String old = in.getText().toString().trim();
+                    if (old.isEmpty()) { toast("Nama profil lama belum diisi"); return; }
+                    Api.adopt(this, old, new Api.Cb<Api.Adopt>() {
+                        @Override public void ok(Api.Adopt r) {
+                            if (r.moved > 0) {
+                                toast("Berhasil: " + r.moved + " data dipindahkan");
+                            } else {
+                                toast("Tidak ada data pada profil \"" + old + "\"");
+                            }
+                            Api.clearCache();
+                        }
+                        @Override public void err(String m) {
+                            toast("Gagal mengadopsi: " + m);
+                        }
+                    });
+                })
+                .setNegativeButton("Batal", null)
+                .show();
+    }
+
+    private void toast(String m) {
         android.widget.Toast.makeText(this, m, android.widget.Toast.LENGTH_SHORT).show();
     }
 
