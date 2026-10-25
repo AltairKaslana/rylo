@@ -1,6 +1,7 @@
 package com.example.ytmplayer;
 
 import android.content.Context;
+import android.content.Intent;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
@@ -40,6 +41,18 @@ public final class Api {
 
     /** Dipanggil sekali dari App.onCreate supaya fallback bisa mencatat log. */
     public static void attach(Context c) { APP = c.getApplicationContext(); }
+
+    /**
+     * Header untuk endpoint data pengguna (/lib/*): token sesi, BUKAN X-Profile.
+     *
+     * Server sengaja tidak lagi mempercayai header X-Profile - dulu siapa pun yang
+     * tahu PIN bisa membaca data profil orang lain cukup dengan mengganti header itu.
+     * Sekarang profil ditentukan dari sesi login, jadi endpoint /lib/* menolak request
+     * tanpa sesi yang sah.
+     */
+    static Request.Builder authed(Request.Builder b, Context c) {
+        return b.header("X-Session", Prefs.session(c));
+    }
 
     /** Host publik -> alamat cadangan (HTTP polos) untuk HP yang TLS-nya tidak sanggup. */
     /**
@@ -460,9 +473,8 @@ public final class Api {
         if (Prefs.server(app).isEmpty()) { cb.err("Alamat server masih kosong"); return; }
         Request req;
         try {
-            req = new Request.Builder().url(base(app) + "/health")
-                    .header("X-Token", Prefs.token(app));
-            req = authed(req, app).build();
+            req = authed(new Request.Builder().url(base(app) + "/health")
+                    .header("X-Token", Prefs.token(app)), app).build();
         } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
         call(req, new Callback() {
             @Override public void onFailure(Call call, IOException e) {

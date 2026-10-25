@@ -170,12 +170,9 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
         box.addView(s);
         box.addView(t);
 
-        // Profil perangkat: favorit, playlist, dan riwayat di server disimpan per profil.
-        // Nilai ini dibuat acak sekali saat aplikasi pertama dipasang, jadi menghapus
-        // aplikasi (uninstall) membuatnya baru dan data lama seolah hilang. Karena itu
-        // profil ditampilkan dan bisa ditulis ulang - setelah memasang ulang, ketik lagi
-        // profil yang sama untuk mengambil kembali data.
         // Sesi akun: tampilkan siapa yang sedang masuk, dengan jalan keluar.
+        // Profil tidak lagi bisa diketik bebas di sini - ia milik akun (username +
+        // sandi) supaya data tidak pindah ke profil lain tanpa disadari.
         TextView who = new TextView(this);
         who.setText("Masuk sebagai: " + Prefs.alias(this)
                 + (Prefs.username(this).isEmpty() ? "" : " (@" + Prefs.username(this) + ")"));
@@ -210,17 +207,13 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
                 .setPositiveButton("Simpan", (d, w) -> {
                     String srv = s.getText().toString().trim();
                     String pin = t.getText().toString().trim();
-                    String prof = pf.getText().toString().trim();
                     if (srv.isEmpty() || pin.isEmpty()) {
                         toast("Alamat dan PIN belum lengkap");
                         return;
                     }
-                    if (prof.isEmpty()) {
-                        toast("Profil perangkat tidak boleh kosong");
-                        return;
-                    }
+                    // Profil tidak lagi diubah dari sini: ia milik akun (username + sandi)
+                    // dan diganti lewat layar masuk, supaya data tidak pindah tanpa sadar.
                     Prefs.save(this, srv, pin);
-                    Prefs.setProfile(this, prof);
                     Api.clearCache();
                     Api.ping(this, new Api.Cb<String>() {
                         @Override public void ok(String r) { toast(r); select(tab < 0 ? 0 : tab); }
