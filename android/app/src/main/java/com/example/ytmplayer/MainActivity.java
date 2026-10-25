@@ -333,7 +333,7 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
                 .show();
     }
 
-    private void toast(String m) {
+    public void toast(String m) {
         android.widget.Toast.makeText(this, m, android.widget.Toast.LENGTH_SHORT).show();
     }
 
