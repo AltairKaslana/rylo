@@ -48,6 +48,33 @@ public final class Prefs {
 
     public static String token(Context c) { return sp(c).getString("token", ""); }
 
+    // ---- sesi akun (username + sandi per profil) ----
+
+    /** Token sesi hasil login. Kosong = belum masuk. */
+    public static String session(Context c) { return sp(c).getString("session", ""); }
+
+    public static String username(Context c) { return sp(c).getString("username", ""); }
+
+    /** Alias singkat profil, mis. "Altair". */
+    public static String alias(Context c) {
+        String a = sp(c).getString("alias", "");
+        return (a == null || a.isEmpty()) ? username(c) : a;
+    }
+
+    public static boolean loggedIn(Context c) { return !session(c).isEmpty(); }
+
+    /** Simpan hasil login. */
+    public static void saveSession(Context c, String token, String username, String alias) {
+        sp(c).edit().putString("session", token == null ? "" : token)
+                .putString("username", username == null ? "" : username)
+                .putString("alias", alias == null ? "" : alias).apply();
+    }
+
+    /** Hapus sesi (keluar). Alamat server & kunci master tetap disimpan. */
+    public static void clearSession(Context c) {
+        sp(c).edit().remove("session").remove("username").remove("alias").apply();
+    }
+
     public static boolean ready(Context c) { return !server(c).isEmpty() && !token(c).isEmpty(); }
 
     /** True kalau perangkat ini perlu jalur TLS cadangan (sertifikat RSA kita sendiri). */

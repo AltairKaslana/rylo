@@ -21,6 +21,11 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Layar masuk: wajib dilewati karena endpoint data pengguna kini
+             menuntut token sesi, bukan header X-Profile bebas. -->
+        <activity android:name=".LoginActivity" android:exported="false"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize"/>
         <activity android:name=".PlayerActivity" android:exported="false"
             android:screenOrientation="portrait"/>
         <service android:name=".PlaybackService" android:exported="false">

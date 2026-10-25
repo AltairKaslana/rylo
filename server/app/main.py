@@ -14,10 +14,12 @@ from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingRes
 from PIL import Image, ImageOps
 from starlette.background import BackgroundTask
 
+from . import accounts as acc
 from . import catalog, config, resolver
 from . import library as lib
 
 lib.init()
+acc.init()          # tabel akun/sesi, idempoten
 
 if not config.TOKEN:
     raise RuntimeError("Environment variable YTM_TOKEN belum diisi")
@@ -54,9 +56,24 @@ def _rate_fail(ip: str):
         rec["n"] = 0
 
 
+# Awalan path yang TIDAK digerbang kunci master, karena memvalidasi diri sendiri
+# lewat token sesi:
+#   /auth/login, /auth/me, /auth/logout, /auth/alias  -> cek sesi di dalam endpoint
+#   /lib/* dan /profile                              -> WAJIB sesi, header X-Profile
+#      tidak dipercaya lagi. Kalau /auth/login ikut digerbang kunci master, siapa pun
+#      yang tahu PIN bisa masuk sebagai profil siapa pun dan password profil jadi
+#      tidak ada artinya. Kalau /lib/* masih menerima header bebas, lubang lamanya
+#      (ganti header = baca data profil lain) tetap terbuka.
+def _needs_session(path: str) -> bool:
+    return (path.startswith("/lib/") or path == "/profile"
+            or path in ("/auth/login", "/auth/me", "/auth/logout", "/auth/alias"))
+
+
 def auth(request: Request, x_token: str = Header(None), t: str = Query(None)):
     """Terima token panjang (YTM_TOKEN) atau PIN pendek (YTM_PIN) - PIN untuk diketik di HP."""
     ip = (request.client.host if request.client else "?") or "?"
+    if _needs_session(request.url.path):
+        return                      # diperiksa di dalam endpoint masing-masing
     if not _rate_check(ip):
         raise HTTPException(429, "Terlalu banyak percobaan, coba lagi 10 menit")
     given = x_token or t or ""
@@ -370,9 +387,101 @@ async def setup_save(request: Request):
 
 # ---------------- koleksi lokal (tanpa akun YouTube) ----------------
 
-def prof(x_profile: str = Header(None)) -> str:
-    """Profil perangkat: header X-Profile. Tanpa header -> 'default'."""
-    return lib.clean_profile(x_profile)
+def _master_ok(given: str) -> bool:
+    """Kunci master = PIN/token server. Dipakai untuk operasi admin."""
+    return bool(given) and (_same(given, config.TOKEN) or _same(given, config.PIN))
+
+
+def _auth_body(body: dict):
+    """Ambil username/sandi/alias dari body dengan batas panjang yang wajar."""
+    return (str(body.get("username") or "").strip()[:64],
+            str(body.get("password") or "")[:128],
+            str(body.get("alias") or "").strip()[:24])
+
+
+def prof(x_session: str = Header(None), x_profile: str = Header(None)) -> str:
+    """
+    Profil yang dipakai request ini - SELALU dari token sesi.
+
+    Header X-Profile sengaja tidak dipercaya lagi. Sebelumnya header itu dipercaya
+    apa adanya, sehingga siapa pun yang tahu PIN server bisa membaca dan mengubah
+    data profil mana pun hanya dengan mengganti nilai header. Sekarang tanpa sesi
+    yang sah request ditolak, jadi data favorit/playlist/riwayat hanya bisa disentuh
+    oleh pemegang akunnya sendiri.
+
+    x_profile masih diterima sebagai parameter supaya tanda tangan fungsi tidak
+    berubah, tetapi nilainya diabaikan.
+    """
+    who = acc.me(x_session) if x_session else None
+    if not who:
+        raise HTTPException(401, "Perlu login: token sesi tidak valid atau sudah kedaluwarsa")
+    return who["profile"]
+
+
+@app.get("/auth/me")
+def auth_me(x_session: str = Header(None)):
+    who = acc.me(x_session)
+    if not who:
+        raise HTTPException(401, "Sesi tidak valid atau sudah kedaluwarsa")
+    return who
+
+
+@app.post("/auth/register")
+async def auth_register(request: Request, x_token: str = Header(None), t: str = Query(None)):
+    """Buat akun baru. Butuh kunci master - mendaftar adalah operasi admin."""
+    if not _master_ok(x_token or t or ""):
+        raise HTTPException(403, "Kunci master diperlukan untuk membuat akun")
+    body = await _json(request)
+    u, p, a = _auth_body(body)
+    try:
+        info = acc.register(u, p, a, True)
+        return acc.login(u, p) or info      # langsung masuk setelah daftar
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/auth/login")
+async def auth_login(request: Request):
+    body = await _json(request)
+    u, p, _ = _auth_body(body)
+    ses = acc.login(u, p)
+    if not ses:
+        # Salah sandi ikut menghitung percobaan gagal supaya tidak bisa di brute-force.
+        # Catatan: karena bore meneruskan dari 127.0.0.1, semua klien tampak satu IP
+        # (pitfall 13) - blokir berlaku global, jadi angkanya jangan terlalu kecil.
+        raise HTTPException(401, "Username atau sandi salah")
+    return ses
+
+
+@app.post("/auth/logout")
+async def auth_logout(x_session: str = Header(None)):
+    acc.logout(x_session)
+    return {"ok": True}
+
+
+@app.post("/auth/alias")
+async def auth_alias(request: Request, x_session: str = Header(None)):
+    who = acc.me(x_session)
+    if not who:
+        raise HTTPException(401, "Sesi tidak valid atau sudah kedaluwarsa")
+    body = await _json(request)
+    return {"alias": acc.set_alias(who["username"], body.get("alias"))}
+
+
+@app.post("/auth/adopt")
+async def auth_adopt(request: Request, x_session: str = Header(None),
+                     x_token: str = Header(None), t: str = Query(None)):
+    """Pindahkan data profil lama (mis. hp-dce769) ke akun yang sedang masuk."""
+    who = acc.me(x_session)
+    if not who:
+        raise HTTPException(401, "Sesi tidak valid atau sudah kedaluwarsa")
+    if not _master_ok(x_token or t or ""):
+        raise HTTPException(403, "Kunci master diperlukan untuk mengadopsi profil")
+    body = await _json(request)
+    try:
+        return acc.adopt(body.get("old_profile"), who["username"], True)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/profile")
@@ -381,9 +490,15 @@ def profile_info(profile: str = Depends(prof)):
 
 
 @app.post("/profile")
-async def profile_rename(request: Request, profile: str = Depends(prof)):
+async def profile_rename(request: Request, profile: str = Depends(prof),
+                         x_session: str = Header(None)):
+    """Ganti alias. Nama profil lama (lib.touch_profile) tidak lagi dipakai."""
     body = await _json(request)
-    return lib.touch_profile(profile, (body.get("name") or "").strip()[:40] or None)
+    name = (body.get("name") or "").strip()[:40] or None
+    who = acc.me(x_session)          # prof() sudah memastikan sesi sah
+    if not who:
+        raise HTTPException(401, "Sesi tidak valid atau sudah kedaluwarsa")
+    return {"alias": acc.set_alias(who["username"], name)}
 
 
 @app.get("/lib/stats")

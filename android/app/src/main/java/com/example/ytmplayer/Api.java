@@ -54,6 +54,44 @@ public final class Api {
         return "musik.altairk.my.id".equals(host) || BORE_HOST.equals(host);
     }
 
+    /**
+     * Kalau endpoint data pengguna menjawab 401, sesi sudah tidak sah (kedaluwarsa
+     * atau dicabut). Buang sesi dan kembalikan pengguna ke layar masuk - tanpa ini
+     * aplikasi terus memunculkan "Server merespons 401" di setiap tab.
+     */
+    private static void handleAuthFail(Context app, int code, String path) {
+        if (code != 401 || !path.startsWith("/lib/")) return;
+        if (!Prefs.loggedIn(app)) return;
+        Prefs.clearSession(app);
+        Intent i = new Intent(app, LoginActivity.class);
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        app.startActivity(i);
+    }
+
+    /** Escape minimal untuk menyusun JSON tangan (tanpa dependency tambahan). */
+    private static String esc(String s) {
+        if (s == null) return "";
+        StringBuilder b = new StringBuilder(s.length() + 8);
+        for (char ch : s.toCharArray()) {
+            if (ch == '"' || ch == '\\') b.append('\\');
+            else if (ch == '\n') { b.append('\\'); b.append('n'); continue; }
+            b.append(ch);
+        }
+        return b.toString();
+    }
+
+    /** Hasil login/daftar: token sesi + identitas profil. */
+    public static class Session {
+        public String token, username, profile, alias;
+        public long expires_at;
+    }
+
+    /** Hasil adopsi profil lama. */
+    public static class Adopt {
+        public int moved;
+        public String profile;
+    }
+
     public static String hostOf(String url) {
         try { return java.net.URI.create(url).getHost(); } catch (Exception e) { return ""; }
     }
@@ -271,6 +309,57 @@ public final class Api {
                 .placeholder(R.drawable.ph).into(v);
     }
 
+    /**
+     * POST JSON generik, meniru pola get() supaya pesan galat dari server
+     * (field "detail") tidak hilang. Tidak di-cache: responsnya bergantung pada
+     * data pengguna.
+     */
+    private static <T> void post(Context c, String path, String json, final Class<T> cls,
+                                 final Cb<T> cb) {
+        final Context app = c.getApplicationContext();
+        if (!Prefs.ready(app)) { cb.err("Server belum diatur (ketuk ikon gerigi di kanan atas)"); return; }
+        final String url = base(app) + path;
+        Request req;
+        try {
+            req = authed(new Request.Builder().url(url).header("X-Token", Prefs.token(app)),
+                    app).post(okhttp3.RequestBody.create(
+                            okhttp3.MediaType.parse("application/json; charset=utf-8"),
+                            json == null ? "{}" : json)).build();
+        } catch (Exception e) {
+            cb.err("Alamat server tidak valid");
+            return;
+        }
+        call(req, new Callback() {
+            @Override public void onFailure(Call call, IOException e) {
+                final String why = Log2.write(app, "POST " + url, e);
+                UI.post(() -> cb.err("Gagal: " + why));
+            }
+
+            @Override public void onResponse(Call call, Response resp) {
+                try {
+                    final String body = resp.body().string();
+                    if (!resp.isSuccessful()) {
+                        String msg = "Server merespons " + resp.code();
+                        try {
+                            JsonObject o = JsonParser.parseString(body).getAsJsonObject();
+                            if (o.has("detail")) msg += ": " + o.get("detail").getAsString();
+                        } catch (Exception ignored) { }
+                        final String m = msg;
+                        handleAuthFail(app, resp.code(), path);
+                        UI.post(() -> cb.err(m));
+                        return;
+                    }
+                    final T v = GSON.fromJson(body, cls);
+                    UI.post(() -> cb.ok(v));
+                } catch (Exception e) {
+                    UI.post(() -> cb.err("Respons tidak valid"));
+                } finally {
+                    resp.close();
+                }
+            }
+        });
+    }
+
     private static <T> void get(Context c, String path, final long ttl, final Class<T> cls, final Cb<T> cb) {
         final Context app = c.getApplicationContext();
         if (!Prefs.ready(app)) {
@@ -289,8 +378,8 @@ public final class Api {
         }
         Request req;
         try {
-            req = new Request.Builder().url(url).header("X-Token", Prefs.token(app))
-                    .header("X-Profile", Prefs.profile(app)).build();
+            req = authed(new Request.Builder().url(url).header("X-Token", Prefs.token(app)),
+                    app).build();
         } catch (Exception e) {
             cb.err("Alamat server tidak valid");
             return;
@@ -311,6 +400,7 @@ public final class Api {
                             if (o.has("detail")) msg += ": " + o.get("detail").getAsString();
                         } catch (Exception ignored) { }
                         final String m = msg;
+                        handleAuthFail(app, resp.code(), path);
                         UI.post(() -> cb.err(m));
                         return;
                     }
@@ -330,6 +420,40 @@ public final class Api {
         });
     }
 
+    // ---------- akun: masuk, daftar, alias, keluar, adopsi profil lama ----------
+
+    /** Masuk dengan username + sandi. Hasilnya token sesi. */
+    public static void login(Context c, String user, String pass, final Cb<Session> cb) {
+        post(c, "/auth/login", "{\"username\":\"" + esc(user) + "\",\"password\":\""
+                + esc(pass) + "\"}", Session.class, cb);
+    }
+
+    /** Daftar akun baru. Butuh kunci master (PIN server). */
+    public static void register(Context c, String user, String pass, String alias,
+                                final Cb<Session> cb) {
+        post(c, "/auth/register", "{\"username\":\"" + esc(user) + "\",\"password\":\""
+                + esc(pass) + "\",\"alias\":\"" + esc(alias) + "\"}",
+                Session.class, cb);
+    }
+
+    /** Pindahkan data profil lama ke akun ini. Butuh kunci master. */
+    public static void adopt(Context c, String oldProfile, final Cb<Adopt> cb) {
+        post(c, "/auth/adopt", "{\"old_profile\":\"" + esc(oldProfile) + "\"}",
+                Adopt.class, cb);
+    }
+
+    /** Ganti alias singkat profil. */
+    public static void setAlias(Context c, String alias, final Cb<Ok> cb) {
+        post(c, "/auth/alias", "{\"alias\":\"" + esc(alias) + "\"}", Ok.class, cb);
+    }
+
+    public static void logout(Context c) {
+        send(c, "POST", "/auth/logout", "{}", new Cb<Ok>() {
+            @Override public void ok(Ok r) { }
+            @Override public void err(String m) { }
+        });
+    }
+
     /** Cek cepat: apakah server hidup dan PIN diterima. */
     public static void ping(Context c, final Cb<String> cb) {
         final Context app = c.getApplicationContext();
@@ -337,8 +461,8 @@ public final class Api {
         Request req;
         try {
             req = new Request.Builder().url(base(app) + "/health")
-                    .header("X-Token", Prefs.token(app))
-                    .header("X-Profile", Prefs.profile(app)).build();
+                    .header("X-Token", Prefs.token(app));
+            req = authed(req, app).build();
         } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
         call(req, new Callback() {
             @Override public void onFailure(Call call, IOException e) {
@@ -371,9 +495,8 @@ public final class Api {
                 okhttp3.MediaType.parse("application/json; charset=utf-8"), json == null ? "{}" : json);
         Request.Builder rb;
         try {
-            rb = new Request.Builder().url(base(app) + path)
-                    .header("X-Token", Prefs.token(app))
-                    .header("X-Profile", Prefs.profile(app));
+            rb = authed(new Request.Builder().url(base(app) + path)
+                    .header("X-Token", Prefs.token(app)), app);
         } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
         if ("DELETE".equals(method)) rb.delete(body);
         else if ("PATCH".equals(method)) rb.patch(body);
@@ -448,9 +571,8 @@ public final class Api {
                 okhttp3.MediaType.parse("application/json; charset=utf-8"), o.toString());
         Request req;
         try {
-            req = new Request.Builder().url(base(app) + "/lib/playlists")
-                    .header("X-Token", Prefs.token(app))
-                    .header("X-Profile", Prefs.profile(app)).post(body).build();
+            req = authed(new Request.Builder().url(base(app) + "/lib/playlists")
+                    .header("X-Token", Prefs.token(app)), app).post(body).build();
         } catch (Exception e) { cb.err("Alamat server tidak valid"); return; }
         call(req, new Callback() {
             @Override public void onFailure(Call call, IOException e) {

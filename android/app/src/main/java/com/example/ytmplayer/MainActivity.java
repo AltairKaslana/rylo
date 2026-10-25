@@ -6,6 +6,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
 import android.view.View;
+import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -40,6 +41,14 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
+        // Tanpa sesi, langsung ke layar masuk - endpoint data pengguna (/lib/*) sekarang
+        // menolak request tanpa token sesi, jadi lanjut tanpa login hanya akan memunculkan
+        // galat 401 di tab Pustaka dan Pencarian.
+        if (!Prefs.loggedIn(this)) {
+            startActivity(new Intent(this, LoginActivity.class));
+            finish();
+            return;
+        }
         setContentView(R.layout.activity_main);
         pb = Playback.get(this);
         mini = findViewById(R.id.mini);
@@ -166,8 +175,27 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
         // aplikasi (uninstall) membuatnya baru dan data lama seolah hilang. Karena itu
         // profil ditampilkan dan bisa ditulis ulang - setelah memasang ulang, ketik lagi
         // profil yang sama untuk mengambil kembali data.
-        final EditText pf = field("Profil perangkat", Prefs.profile(this));
-        box.addView(pf);
+        // Sesi akun: tampilkan siapa yang sedang masuk, dengan jalan keluar.
+        TextView who = new TextView(this);
+        who.setText("Masuk sebagai: " + Prefs.alias(this)
+                + (Prefs.username(this).isEmpty() ? "" : " (@" + Prefs.username(this) + ")"));
+        who.setTextSize(13);
+        who.setTextColor(0xFFFFB27A);
+        who.setPadding(0, Ui.dp(this, 14), 0, 0);
+        box.addView(who);
+
+        Button out = new Button(this);
+        out.setText("Keluar dari profil");
+        out.setBackgroundColor(0xFF2A2D33);
+        out.setTextColor(0xFFFFFFFF);
+        out.setOnClickListener(v -> {
+            Api.logout(MainActivity.this);
+            Prefs.clearSession(MainActivity.this);
+            Api.clearCache();
+            startActivity(new Intent(MainActivity.this, LoginActivity.class));
+            finish();
+        });
+        box.addView(out);
 
         final TextView status = new TextView(this);
         status.setTextSize(12);
