@@ -60,8 +60,30 @@ public final class Api {
      * Dipakai bila HTTPS Cloudflare gagal karena HP lama tidak mendukung cipher ECDSA.
      */
     private static final String BORE_HOST = "bore.pub";
-    /** Port tunnel TLS, dicoba berurutan. 24193 = port aktif saat ini. */
-    private static final int[] BORE_PORTS = {24193, 24191, 24192, 24194, 24195, 24190};
+    /**
+     * Port tunnel TLS (stunnel). HANYA ini yang masih hidup.
+     *
+     * 24191/24192/24194/24195 dulu ada di daftar ini sebagai cadangan waktu port
+     * ikut drift (pitfall 28). Sekarang keempatnya sudah tidak ada sama sekali,
+     * dan membiarkannya di daftar berarti SETIAP kegagalan jaringan menghabiskan
+     * empat percobaan ke port mati lebih dulu. Terbukti di netlog 29 Okt:
+     * 10:57:11 -> 10:57:33 = 22 detik jatuh-bangun sebelum "recs ok", padahal
+     * port yang hidup cuma satu dan ia yang pertama.
+     */
+    private static final int[] BORE_PORTS = {24193};
+    /**
+     * Port HTTP POLOS (bore -> relay, tanpa stunnel). Cadangan TERAKHIR, hanya
+     * dipakai kalau TLS mati total. Skemanya "http" BUKAN "https" - mencoba TLS
+     * ke port ini selalu berakhir "Unable to parse TLS packet header", jadi
+     * skema harus ikut port, jangan diasumsikan https.
+     */
+    private static final int PLAIN_PORT = 24190;
+
+    /** Alamat tunnel efektif. Skema mengikuti port supaya 24190 tidak dicoba TLS. */
+    public static String boreBase(Context c) {
+        int p = activePort(c);
+        return (p == PLAIN_PORT ? "http" : "https") + "://" + BORE_HOST + ":" + p;
+    }
 
     private static boolean hasFallback(String host) {
         return "musik.altairk.my.id".equals(host) || BORE_HOST.equals(host);
@@ -116,33 +138,57 @@ public final class Api {
         return BORE_PORTS[0];
     }
 
-    /** Cari port yang bisa dihubungi. Mengembalikan 0 kalau semua mati. */
+    /**
+     * Cari port tunnel yang benar-benar bisa dihubungi.
+     *
+     * "Bisa dihubungi" berarti port MENJAWAB, bukan berarti auth lolos: port mati
+     * gagal di tingkat koneksi (ConnectException), sedangkan port hidup yang
+     * menolak token menjawab dengan kode HTTP. Karena itu syaratnya ada kode
+     * respons (> 0), bukan 200 - kalau dituntut 200, aplikasi yang belum login
+     * akan menganggap semua port mati dan tidak pernah mempelajari yang hidup.
+     *
+     * Fungsi ini TIDAK menyentuh Prefs.altTls: mengetahui port bukan berarti
+     * memaksa jalur cadangan. Kalau domain Cloudflare sehat, ia harus tetap dipakai.
+     */
     public static int probePort(Context c) {
         for (int p : BORE_PORTS) {
-            try {
-                Request r = new Request.Builder().url("https://" + BORE_HOST + ":" + p + "/health?t="
-                        + enc(Prefs.token(c))).header("X-Profile", Prefs.profile(c)).build();
-                Response resp = HTTP.newCall(r).execute();
-                int code = resp.code();
-                resp.close();
-                if (code == 200) {
-                    Prefs.setBorePort(c, p);
-                    Prefs.setAltTls(c, true);
-                    return p;
-                }
-            } catch (Throwable ignored) { }
+            if (jawab("https", p, c)) return p;
         }
+        if (jawab("http", PLAIN_PORT, c)) return PLAIN_PORT;
         return 0;
     }
 
-    /** Pindah ke port berikutnya (dipakai saat audio gagal). */
+    /** true kalau port menjawab (kode HTTP berapa pun). */
+    private static boolean jawab(String skema, int port, Context c) {
+        try {
+            Request r = new Request.Builder()
+                    .url(skema + "://" + BORE_HOST + ":" + port + "/health?t=" + enc(Prefs.token(c)))
+                    .header("X-Profile", Prefs.profile(c)).build();
+            Response resp = HTTP.newCall(r).execute();
+            int code = resp.code();
+            resp.close();
+            if (code > 0) {
+                Prefs.setBorePort(c, port);
+                return true;
+            }
+        } catch (Throwable ignored) { }
+        return false;
+    }
+
+    /**
+     * Pindah ke port berikutnya. Hanya dua kemungkinan, dan itu memang yang ada:
+     * port TLS utama, lalu HTTP polos sebagai jalan terakhir.
+     *
+     * Fungsi ini SENGAJA menyimpan port yang akan dicoba walau belum tentu hidup -
+     * yang memperbaikinya adalah onResponse, yang kini akhir benar-benar jalan
+     * (lihat call()). Sebelumnya jalur coba-ulang memakai callback asli sehingga
+     * keberhasilan tidak pernah tercatat, sementara kegagalan selalu tercatat.
+     * Akibatnya yang diingat justru port yang mati, dan itulah yang membuat
+     * aplikasi menyisir port mati berulang-ulang.
+     */
     public static int nextPort(Context c) {
         int cur = activePort(c);
-        int idx = 0;
-        for (int i = 0; i < BORE_PORTS.length; i++) {
-            if (BORE_PORTS[i] == cur) { idx = i; break; }
-        }
-        int next = BORE_PORTS[(idx + 1) % BORE_PORTS.length];
+        int next = (cur != PLAIN_PORT) ? PLAIN_PORT : BORE_PORTS[0];
         Prefs.setBorePort(c, next);
         return next;
     }
@@ -155,37 +201,59 @@ public final class Api {
         return false;
     }
 
-    /** Jalankan permintaan; bila TLS gagal, ulangi sekali ke jalur TLS cadangan (sertifikat kita). */
+    /**
+     * Jalankan permintaan; bila jaringan/TLS gagal, ulangi ke jalur cadangan
+     * (tunnel dengan sertifikat RSA kita).
+     *
+     * DUA hal diperbaiki di sini, dan dua-duanya sama-sama membuat aplikasi
+     * menyisir port mati berulang-ulang:
+     *
+     * 1. **Coba-ulang kembali lewat call(), bukan enqueue(cb).** Sebelumnya
+     *    permintaan ulangan memakai callback asli, sehingga onResponse di bawah
+     *    tidak pernah jalan untuknya - keberhasilan tidak tercatat sama sekali,
+     *    sementara nextPort() SELALU mencatat kegagalan. Yang tersimpan jadi
+     *    port yang mati, dan itulah sebabnya port hidup tidak pernah diingat.
+     * 2. **Ada batas kedalaman.** Karena coba-ulang kini terbungkus lagi, ia bisa
+     *    mencoba port berikutnya dan seterusnya; tanpa batas, jaringan yang mati
+     *    total membuat permintaan berputar selamanya.
+     *
+     * Skema ikut port (boreBase), jadi port HTTP polos tidak lagi dicoba TLS.
+     */
     private static void call(final Request req, final Callback cb) {
+        call(req, cb, 0);
+    }
+
+    private static void call(final Request req, final Callback cb, final int depth) {
         HTTP.newCall(req).enqueue(new Callback() {
             @Override public void onFailure(Call call, IOException e) {
                 if (APP != null) Log2.trace(APP, "fail proto=" + req.url().scheme()
                         + " tls=" + Net.provider() + " " + e.getClass().getSimpleName());
 
                 String host = req.url().host();
-                if (hostOf(Prefs.server(APP)).equals(host) && hasFallback(host) && tlsTrouble(e)) {
-                    // domain gagal -> pindah ke tunnel dengan port terbaik
-                    try {
-                        int p = activePort(APP);
-                        String url = "https://" + BORE_HOST + ":" + p + req.url().encodedPath()
-                                + (req.url().encodedQuery() == null ? "" : "?" + req.url().encodedQuery());
-                        if (APP != null) Log2.trace(APP, "tls fallback -> " + url);
-                        Prefs.setAltTls(APP, true);
-                        HTTP.newCall(req.newBuilder().url(url).build()).enqueue(cb);
-                        return;
-                    } catch (Throwable ignored) { }
-                } else if (BORE_HOST.equals(host) && tlsTrouble(e)) {
-                    // port mati -> cari port lain
-                    int p = nextPort(APP);
-                    try {
-                        String url = "https://" + BORE_HOST + ":" + p + req.url().encodedPath()
-                                + (req.url().encodedQuery() == null ? "" : "?" + req.url().encodedQuery());
-                        if (APP != null) Log2.trace(APP, "port mati -> coba " + url);
-                        HTTP.newCall(req.newBuilder().url(url).build()).enqueue(cb);
-                        return;
-                    } catch (Throwable ignored) { }
+                boolean dariDomain = hostOf(Prefs.server(APP)).equals(host);
+                boolean bolehUlang = (dariDomain && hasFallback(host)) || BORE_HOST.equals(host);
+
+                // Habis atau bukan soal jaringan: berhenti, jangan ulang lagi.
+                if (depth >= BORE_PORTS.length + 1 || !bolehUlang || !tlsTrouble(e)) {
+                    cb.onFailure(call, e);
+                    return;
                 }
-                cb.onFailure(call, e);
+
+                // Dari domain  -> pakai port terbaik yang sudah diketahui.
+                // Dari bore    -> portnya mati, pindah (hasilnya tersimpan,
+                //                 lalu dibaca boreBase()).
+                if (!dariDomain) nextPort(APP);
+                if (dariDomain) Prefs.setAltTls(APP, true);
+
+                try {
+                    String url = boreBase(APP) + req.url().encodedPath()
+                            + (req.url().encodedQuery() == null ? "" : "?" + req.url().encodedQuery());
+                    if (APP != null) Log2.trace(APP,
+                            (dariDomain ? "tls fallback -> " : "port mati -> coba ") + url);
+                    call(req.newBuilder().url(url).build(), cb, depth + 1);
+                } catch (Throwable ignored) {
+                    cb.onFailure(call, e);
+                }
             }
 
             @Override public void onResponse(Call call, Response resp) throws IOException {
@@ -295,12 +363,11 @@ public final class Api {
         synchronized (CACHE) { CACHE.clear(); }
     }
 
-    /** Alamat audio. Kalau perangkat sudah pernah gagal TLS, langsung pakai jalur HTTP cadangan. */
     /** Base URL efektif: jalur TLS cadangan dipakai bila sudah pernah diperlukan. */
     public static String base(Context c) {
         String srv = Prefs.server(c);
         if (!Prefs.altTls(c)) return srv;
-        if (hasFallback(hostOf(srv))) return "https://" + BORE_HOST + ":" + activePort(c);
+        if (hasFallback(hostOf(srv))) return boreBase(c);
         return srv;
     }
 

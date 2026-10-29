@@ -24,6 +24,25 @@ public class App extends MultiDexApplication {
         Api.attach(this);
         Log2.trace(this, "TLS: " + Net.provider()
                 + (Net.lastError().isEmpty() ? "" : " | err=" + Net.lastError()));
+
+        // Cari port tunnel yang hidup SEKALI di awal, di thread terpisah.
+        //
+        // Tanpa ini aplikasi hanya mengenal port dari kegagalan: ia baru menyentuh
+        // port yang benar SETELAH beberapa permintaan gagal lebih dulu. Terbukti di
+        // netlog 29 Okt - 22 detik jatuh-bangun melalui port mati sebelum "recs ok",
+        // dan "playback error -> port 24191" lima kali dalam empat hari karena jalur
+        // audio dapat port yang sudah tidak ada.
+        //
+        // Sengaja tidak menyentuh Prefs.altTls: mengetahui port bukan berarti
+        // memaksa jalur cadangan. Kalau domain Cloudflare sehat, ia tetap dipakai.
+        final Context app = this;
+        new Thread(new Runnable() {
+            @Override public void run() {
+                int p = Api.probePort(app);
+                if (p > 0) Log2.trace(app, "port awal -> " + p);
+            }
+        }).start();
+
         final Thread.UncaughtExceptionHandler prev = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
             @Override public void uncaughtException(Thread t, Throwable e) {
