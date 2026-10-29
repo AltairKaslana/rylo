@@ -267,30 +267,17 @@ public final class Api {
         });
     }
 
-    /** Satu entri pencarian terakhir + daftar lagu yang pernah dipilih darinya. */
-    public static class Recent {
-        public String query, kind;
-        public long at;
-        public List<Item> items;
-
-        /** True kalau ada lagu tersimpan -> bisa langsung diputar. */
-        public boolean hasTrack() {
-            return items != null && !items.isEmpty();
-        }
-
-        /** Lagu terbaru yang dipilih dari pencarian ini. */
-        public Item lastTrack() {
-            return hasTrack() ? items.get(0) : null;
-        }
+    /** Satu lagu yang pernah dipilih dari pencarian (rata, terbaru lebih dulu). */
+    public static class RecentSong extends Item {
+        public String query;   // pencarian asalnya, dipakai saat menghapus
+        public long at;        // waktu lagu itu dipilih (epoch detik)
     }
 
-    public static class Recents {
-        public List<Recent> items;
-    }
+    public static class RecentSongs { public List<RecentSong> items; }
 
-    /** Pencarian terakhir (tersimpan di server, ikut profil). */
-    public static void recentSearches(Context c, Cb<Recents> cb) {
-        get(c, "/lib/recent-searches?limit=12", 0, Recents.class, cb);
+    /** Lagu yang pernah dipilih dari pencarian, rata & terbaru lebih dulu. */
+    public static void recentSongs(Context c, Cb<RecentSongs> cb) {
+        get(c, "/lib/recent-songs?limit=30", 0, RecentSongs.class, cb);
     }
 
     /** Simpan pencarian + lagu yang dipilih pengguna (WAJIB POST). */

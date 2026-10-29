@@ -11,12 +11,19 @@
     android:paddingBottom="10dp"
     android:background="?android:attr/selectableItemBackground">
 
+    <!--
+      Sampul lagu. Di tingkat pencarian ini menampilkan lagu terbaru yang dipilih
+      dari pencarian itu, supaya barisnya punya wajah dan bukan cuma teks. Kalau
+      pencarian belum punya lagu tersimpan, Glide menampilkan placeholder ph.
+      Sebelumnya di sini ada ikon riwayat 18dp - itu sebabnya daftar pencarian
+      terakhir terlihat sebagai teks telanjang tanpa thumbnail.
+    -->
     <ImageView
-        android:layout_width="18dp"
-        android:layout_height="18dp"
-        android:src="@drawable/ic_n_prev"
-        android:alpha="0.55"
-        android:contentDescription="Riwayat" />
+        android:id="@+id/cover"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:scaleType="centerCrop"
+        android:contentDescription="Sampul" />
 
     <LinearLayout
         android:layout_width="0dp"

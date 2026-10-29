@@ -385,6 +385,27 @@ def searches(profile, limit=12):
     return out
 
 
+def recent_songs(profile, limit=30):
+    """Lagu yang pernah dipilih dari pencarian, rata & terbaru lebih dulu.
+
+    Sengaja RATA, bukan dikelompokkan per pencarian: daftar pencarian dibatasi
+    12 sementara setiap kata kunci yang diketik pun tercatat, jadi lagu yang
+    dipilih sering terdorong keluar oleh pencarian kosong. Dengan menarik dari
+    search_items langsung, lagu yang dipilih tidak bisa terdorong apa pun.
+    `query` ikut dikembalikan karena menghapus satu lagu butuh pasangan
+    (query, video_id).
+    """
+    with _conn() as c:
+        rows = c.execute("""SELECT video_id, title, subtitle, thumb, dur, query, picked_at
+                            FROM search_items WHERE profile=?
+                            ORDER BY picked_at DESC LIMIT ?""",
+                         (profile, limit)).fetchall()
+        # kind="song" wajib: tanpa itu aplikasi membuka halaman detail, bukan memutar
+        return [dict(kind="song", id=r["video_id"], title=r["title"],
+                     subtitle=r["subtitle"], thumb=r["thumb"], dur=r["dur"] or 0,
+                     query=r["query"], at=r["picked_at"]) for r in rows]
+
+
 def search_item_remove(profile, q, vid):
     with _conn() as c:
         c.execute("DELETE FROM search_items WHERE profile=? AND query=? AND video_id=?",

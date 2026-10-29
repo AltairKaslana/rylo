@@ -24,11 +24,8 @@ public class SearchFragment extends BaseFragment {
     private View recentPanel, recentEmpty;
     private TextView recentClear;
     private RecyclerView recentList;
-    private Adapters_Recent.QueryAdapter queryAdapter;
-    private Adapters_Recent.TrackAdapter trackAdapter;
-    private final java.util.List<Api.Recent> recentData = new java.util.ArrayList<>();
-    private Api.Recent drilled;          // pencarian yang sedang dibuka isinya
-    private TextView recentTitle;
+    private Adapters_Recent.SongAdapter songAdapter;
+    private final java.util.List<Api.RecentSong> songs = new java.util.ArrayList<>();
 
     @Override protected int layout() { return R.layout.fragment_search; }
 
@@ -45,34 +42,31 @@ public class SearchFragment extends BaseFragment {
         recentClear = v.findViewById(R.id.recentClear);
         recentList = v.findViewById(R.id.recentList);
         recentList.setLayoutManager(new LinearLayoutManager(requireContext()));
-        recentTitle = v.findViewById(R.id.recentTitle);
-        v.<View>findViewById(R.id.recentBack).setOnClickListener(x -> showQueries());
 
-        queryAdapter = new Adapters_Recent.QueryAdapter(recentData,
-                r -> {                       // ketuk -> buka daftar lagunya
-                    if (r.hasTrack()) {
-                        drilled = r;
-                        showTracks(r);
-                    } else {                  // belum ada lagu -> cari lagi
-                        q.setText(r.query);
-                        q.setSelection(r.query.length());
-                        run();
-                    }
+        // Daftar lagu rata: setiap baris langsung lagu (thumbnail + judul), ketuk
+        // untuk memutar. Tidak ada lagi tingkat "daftar pencarian" di depannya -
+        // itu dua langkah untuk hal yang pengguna mau: memutar lagu lama.
+        songAdapter = new Adapters_Recent.SongAdapter(songs,
+                s -> {                       // ketuk lagu -> putar
+                    java.util.List<Item> ctx = new java.util.ArrayList<>();
+                    for (Api.RecentSong x : songs) ctx.add(x);
+                    main().open(s, ctx, false);
                 },
-                r -> {                       // ikon silang -> hapus pencarian ini
-                    Api.forgetSearch(requireContext(), r.query);
-                    recentData.remove(r);
-                    queryAdapter.notifyDataSetChanged();
+                s -> {                       // silang -> hapus lagu dari riwayat
+                    Api.forgetSearchItem(requireContext(), s.query, s.id);
+                    for (int i = songs.size() - 1; i >= 0; i--) {
+                        if (songs.get(i).id != null && songs.get(i).id.equals(s.id)) {
+                            songs.remove(i);
+                        }
+                    }
+                    songAdapter.notifyDataSetChanged();
                     paintRecent(true);
                 });
-        recentList.setAdapter(queryAdapter);
-
+        recentList.setAdapter(songAdapter);
         recentClear.setOnClickListener(x -> {
             Api.forgetSearch(requireContext(), "");
-            recentData.clear();
-            drilled = null;
-            queryAdapter.notifyDataSetChanged();
-            showQueries();
+            songs.clear();
+            songAdapter.notifyDataSetChanged();
             paintRecent(true);
         });
 
@@ -152,52 +146,22 @@ public class SearchFragment extends BaseFragment {
         recentClear.setVisibility(ada ? View.VISIBLE : View.GONE);
     }
 
-    /** Tampilkan daftar pencarian. */
-    private void showQueries() {
-        drilled = null;
-        if (recentTitle != null) recentTitle.setText("Pencarian terakhir");
-        View back = getView() == null ? null : getView().findViewById(R.id.recentBack);
-        if (back != null) back.setVisibility(View.GONE);
-        if (recentClear != null) recentClear.setVisibility(recentData.isEmpty() ? View.GONE : View.VISIBLE);
-        if (queryAdapter != null) {
-            recentList.setAdapter(queryAdapter);
-            queryAdapter.notifyDataSetChanged();
-        }
-    }
-
-    /** Tampilkan lagu-lagu yang dipilih dari sebuah pencarian. */
-    private void showTracks(Api.Recent r) {
-        if (recentTitle != null) recentTitle.setText(r.query);
-        View back = getView() == null ? null : getView().findViewById(R.id.recentBack);
-        if (back != null) back.setVisibility(View.VISIBLE);
-        if (recentClear != null) recentClear.setVisibility(View.GONE);
-        trackAdapter = new Adapters_Recent.TrackAdapter(r,
-                (rec, it) -> {               // ketuk lagu -> putar
-                    java.util.List<Item> ctx = new java.util.ArrayList<>();
-                    ctx.add(it);
-                    main().open(it, ctx, false);
-                },
-                (rec, it) -> {               // silang -> hapus lagu ini dari riwayat
-                    Api.forgetSearchItem(requireContext(), rec.query, it.id);
-                    if (rec.items != null) rec.items.remove(it);
-                    if (rec.items == null || rec.items.isEmpty()) {
-                        recentData.remove(rec);
-                        showQueries();
-                    } else if (trackAdapter != null) {
-                        trackAdapter.notifyDataSetChanged();
-                    }
-                });
-        recentList.setAdapter(trackAdapter);
-    }
-
-    /** Muat pencarian terakhir dari server (ikut profil, jadi sama di semua HP). */
+    /** Muat lagu yang pernah dipilih dari pencarian (ikut profil, sama di semua HP). */
     public void loadRecent() {
-        Api.recentSearches(requireContext(), new Api.Cb<Api.Recents>() {
-            @Override public void ok(Api.Recents r) {
+        Api.recentSongs(requireContext(), new Api.Cb<Api.RecentSongs>() {
+            @Override public void ok(Api.RecentSongs r) {
                 if (!isAdded()) return;
-                recentData.clear();
-                if (r != null && r.items != null) recentData.addAll(r.items);
-                showQueries();
+                songs.clear();
+                if (r != null && r.items != null) {
+                    // lagu yang sama bisa tersimpan di bawah dua pencarian:
+                    // tampilkan sekali, yang terbaru (server sudah urut) yang menang
+                    java.util.Set<String> seen = new java.util.HashSet<>();
+                    for (Api.RecentSong s : r.items) {
+                        if (s.id == null || !seen.add(s.id)) continue;
+                        songs.add(s);
+                    }
+                }
+                songAdapter.notifyDataSetChanged();
                 paintRecent(q.getText().toString().trim().isEmpty());
             }
             @Override public void err(String m) { }

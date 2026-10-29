@@ -12,93 +12,39 @@ import androidx.recyclerview.widget.RecyclerView;
 import java.util.List;
 
 /**
- * Daftar pencarian terakhir, dua tingkat:
- *  - tingkat pencarian: judul pencarian + jumlah lagu tersimpan
- *  - tingkat lagu: lagu-lagu yang pernah dipilih dari pencarian itu
+ * Daftar lagu yang pernah dipilih dari pencarian.
+ *
+ * Dulu dua tingkat: daftar kata kunci dulu, lalu lagu-lagunya setelah salah
+ * satunya diketuk. Itu dua langkah untuk hal yang pengguna sebenarnya mau -
+ * memutar lagu yang sudah pernah dicari. Sekarang rata: setiap baris langsung
+ * lagu, dengan thumbnail, dan ketuk untuk memutar.
  */
 public class Adapters_Recent {
-    public interface OnPickQuery { void pick(Api.Recent r); }
-    public interface OnDropQuery { void drop(Api.Recent r); }
-    public interface OnPickTrack { void pick(Api.Recent r, Item it); }
-    public interface OnDropTrack { void drop(Api.Recent r, Item it); }
 
-    /** Waktu relatif singkat. */
-    static String relatif(long at) {
-        if (at <= 0) return "";
-        long detik = (System.currentTimeMillis() / 1000L) - at;
-        if (detik < 60) return "baru saja";
-        if (detik < 3600) return (detik / 60) + " menit lalu";
-        if (detik < 86400) return (detik / 3600) + " jam lalu";
-        if (detik < 2592000) return (detik / 86400) + " hari lalu";
-        return "lama";
-    }
-
-    // ---------- tingkat pencarian ----------
-    public static class QueryVH extends RecyclerView.ViewHolder {
-        final TextView title, meta;
-        final ImageView del;
-        QueryVH(View v) {
-            super(v);
-            title = v.findViewById(R.id.title);
-            meta = v.findViewById(R.id.meta);
-            del = v.findViewById(R.id.del);
-        }
-    }
-
-    public static class QueryAdapter extends RecyclerView.Adapter<QueryVH> {
-        private final List<Api.Recent> data;
-        private final OnPickQuery pick;
-        private final OnDropQuery drop;
-
-        public QueryAdapter(List<Api.Recent> data, OnPickQuery pick, OnDropQuery drop) {
-            this.data = data;
-            this.pick = pick;
-            this.drop = drop;
-        }
-
-        @Override public int getItemCount() { return data == null ? 0 : data.size(); }
-
-        @NonNull @Override
-        public QueryVH onCreateViewHolder(@NonNull ViewGroup parent, int type) {
-            return new QueryVH(LayoutInflater.from(parent.getContext())
-                    .inflate(R.layout.item_recent, parent, false));
-        }
-
-        @Override public void onBindViewHolder(@NonNull QueryVH h, int p) {
-            final Api.Recent r = data.get(p);
-            h.title.setText(r.query);
-            int n = r.items == null ? 0 : r.items.size();
-            String meta = n > 1 ? n + " lagu tersimpan"
-                    : n == 1 ? "1 lagu tersimpan"
-                    : relatif(r.at);
-            h.meta.setText(meta);
-            h.itemView.setOnClickListener(x -> pick.pick(r));
-            h.del.setOnClickListener(x -> drop.drop(r));
-        }
-    }
-
-    // ---------- tingkat lagu ----------
     public static class TrackVH extends RecyclerView.ViewHolder {
+        final ImageView cover;
         final TextView title, meta;
         final ImageView del;
         TrackVH(View v) {
             super(v);
+            cover = v.findViewById(R.id.cover);
             title = v.findViewById(R.id.title);
             meta = v.findViewById(R.id.meta);
             del = v.findViewById(R.id.del);
         }
     }
 
-    public static class TrackAdapter extends RecyclerView.Adapter<TrackVH> {
-        private final Api.Recent recent;
-        private final List<Item> data;
-        private final OnPickTrack pick;
-        private final OnDropTrack drop;
+    public static class SongAdapter extends RecyclerView.Adapter<TrackVH> {
+        public interface OnPlay { void play(Api.RecentSong s); }
+        public interface OnDrop { void drop(Api.RecentSong s); }
 
-        public TrackAdapter(Api.Recent recent, OnPickTrack pick, OnDropTrack drop) {
-            this.recent = recent;
-            this.data = recent.items;
-            this.pick = pick;
+        private final List<Api.RecentSong> data;
+        private final OnPlay play;
+        private final OnDrop drop;
+
+        public SongAdapter(List<Api.RecentSong> data, OnPlay play, OnDrop drop) {
+            this.data = data;
+            this.play = play;
             this.drop = drop;
         }
 
@@ -111,11 +57,13 @@ public class Adapters_Recent {
         }
 
         @Override public void onBindViewHolder(@NonNull TrackVH h, int p) {
-            final Item it = data.get(p);
-            h.title.setText(it.title != null ? it.title : recent.query);
-            h.meta.setText(it.subtitle != null ? it.subtitle : "");
-            h.itemView.setOnClickListener(x -> pick.pick(recent, it));
-            h.del.setOnClickListener(x -> drop.drop(recent, it));
+            final Api.RecentSong s = data.get(p);
+            // kalau judul lagu hilang, pakai kata kunci pencarian asalnya
+            h.title.setText(s.title != null ? s.title : s.query);
+            h.meta.setText(s.subtitle != null ? s.subtitle : "");
+            Api.thumb(h.cover, s.thumb, Ui.dp(h.itemView.getContext(), 48), 6);
+            h.itemView.setOnClickListener(x -> play.play(s));
+            h.del.setOnClickListener(x -> drop.drop(s));
         }
     }
 }

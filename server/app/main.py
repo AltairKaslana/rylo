@@ -628,6 +628,16 @@ async def remember_search(request: Request, profile: str = Depends(prof)):
     return {"ok": True}
 
 
+@app.get("/lib/recent-songs")
+def recent_songs_route(profile: str = Depends(prof), limit: int = 30):
+    """Lagu yang pernah dipilih dari pencarian, rata & terbaru lebih dulu.
+
+    Tab Pencarian memakai ini supaya lagunya tampil langsung beserta thumbnail
+    dan bisa diputar tanpa membuka daftar pencarian dulu.
+    """
+    return {"items": lib.recent_songs(profile, limit)}
+
+
 @app.delete("/lib/recent-searches")
 async def forget_search(request: Request, profile: str = Depends(prof), q: str = "", vid: str = ""):
     """Hapus satu lagu (q+vid), satu pencarian (q), atau semua (tanpa q)."""
