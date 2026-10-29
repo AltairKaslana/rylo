@@ -444,12 +444,19 @@ async def auth_register(request: Request, x_token: str = Header(None), t: str = 
 async def auth_login(request: Request):
     body = await _json(request)
     u, p, _ = _auth_body(body)
+    # Kunci per-IP-per-username, BUKAN per-IP polos: di belakang bore semua klien
+    # tampak 127.0.0.1 (pitfall 13), jadi kunci IP polos akan mengunci SEMUA pengguna
+    # begitu satu orang salah sandi. Dengan kunci ini hanya akun yang ditebak yang
+    # terbebani; pengguna lain tetap bisa masuk. Pola sama dengan auth() di atas.
+    ip = (request.client.host if request.client else "?") or "?"
+    key = f"login:{ip}:{u}"
+    if not _rate_check(key):
+        raise HTTPException(429, "Terlalu banyak percobaan gagal, coba lagi 10 menit")
     ses = acc.login(u, p)
     if not ses:
-        # Salah sandi ikut menghitung percobaan gagal supaya tidak bisa di brute-force.
-        # Catatan: karena bore meneruskan dari 127.0.0.1, semua klien tampak satu IP
-        # (pitfall 13) - blokir berlaku global, jadi angkanya jangan terlalu kecil.
+        _rate_fail(key)          # salah sandi = percobaan gagal, ikut dihitung
         raise HTTPException(401, "Username atau sandi salah")
+    _FAILS.pop(key, None)        # berhasil -> bersihkan hitungan akun ini
     return ses
 
 
