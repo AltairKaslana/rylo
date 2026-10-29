@@ -3,7 +3,7 @@ import io
 import os
 import re
 import secrets
-import threading
+import concurrent.futures
 import time
 from urllib.parse import urlparse
 
@@ -89,6 +89,29 @@ VID = re.compile(r"^[\w-]{11}$")
 IMG_HOSTS = ("googleusercontent.com", "ggpht.com", "ytimg.com")
 os.makedirs(config.IMG_CACHE, exist_ok=True)
 
+# Preload URL audio di belakang supaya "tekan play -> bunyi" tidak menunggu ~3,5s
+# ekstraksi yt-dlp. Pool terbatas: jangan banjiri YouTube/CPU box yang lemah.
+_prefetch_pool = concurrent.futures.ThreadPoolExecutor(
+    max_workers=max(1, config.PREFETCH_WORKERS), thread_name_prefix="prefetch")
+
+
+def _prefetch_one(vid):
+    try:
+        resolver.get(vid)
+    except Exception:  # noqa: BLE001
+        pass            # prefetch gagal tidak mengganggu; play nanti resolve sendiri
+
+
+def schedule_prefetch(vids):
+    """Anakan ekstraksi URL audio untuk daftar video yang belum ter-cache."""
+    for v in vids:
+        if not (v and VID.match(v)) or resolver.cached(v):
+            continue
+        try:
+            _prefetch_pool.submit(_prefetch_one, v)
+        except RuntimeError:
+            pass        # pool sudah dimatikan (saat shutdown)
+
 
 def call(fn, *args):
     try:
@@ -116,7 +139,10 @@ def home():
 
 @app.get("/search")
 def search(q: str, type: str = "songs"):
-    return {"items": call(catalog.search, q, type)}
+    items = call(catalog.search, q, type)
+    if type == "songs":
+        schedule_prefetch([it.get("id") for it in items[:config.PREFETCH]])
+    return {"items": items}
 
 
 @app.get("/auth-status")
@@ -150,7 +176,9 @@ def detail(kind: str, iid: str):
 @app.get("/radio/{vid}")
 def radio(vid: str):
     check_vid(vid)
-    return {"items": call(catalog.radio, vid)}
+    items = call(catalog.radio, vid)
+    schedule_prefetch([it.get("id") for it in items[:config.PREFETCH]])
+    return {"items": items}
 
 
 @app.get("/lyrics/{vid}")
@@ -162,14 +190,7 @@ def lyrics(vid: str):
 @app.get("/prefetch/{vid}")
 def prefetch(vid: str):
     check_vid(vid)
-
-    def work():
-        try:
-            resolver.get(vid)
-        except Exception:  # noqa: BLE001
-            pass
-
-    threading.Thread(target=work, daemon=True).start()
+    schedule_prefetch([vid])
     return {"ok": True}
 
 

@@ -49,3 +49,9 @@ def get(vid, force=False):
         _cache[vid] = res
         _prune()
         return res
+
+
+def cached(vid):
+    """True kalau URL audio untuk vid sudah ada di cache dan belum kedaluwarsa."""
+    hit = _cache.get(vid)
+    return bool(hit and hit["exp"] > time.time())
