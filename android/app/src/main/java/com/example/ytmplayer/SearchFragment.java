@@ -140,7 +140,7 @@ public class SearchFragment extends BaseFragment {
         if (recentPanel == null) return;
         recentPanel.setVisibility(kosong ? View.VISIBLE : View.GONE);
         if (!kosong) return;
-        boolean ada = recentData != null && !recentData.isEmpty();
+        boolean ada = !songs.isEmpty();
         recentList.setVisibility(ada ? View.VISIBLE : View.GONE);
         recentEmpty.setVisibility(ada ? View.GONE : View.VISIBLE);
         recentClear.setVisibility(ada ? View.VISIBLE : View.GONE);
