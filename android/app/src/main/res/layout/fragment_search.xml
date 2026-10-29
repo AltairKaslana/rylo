@@ -48,6 +48,15 @@
             android:visibility="gone"/>
     </LinearLayout>
 
-    <include layout="@layout/fragment_list" android:layout_width="match_parent"
+    <!--
+      Daftar hasil pencarian. Sengaja diberi id supaya bisa disembunyikan saat
+      panel "lagu terakhir" tampil: keduanya TIDAK boleh terlihat bersamaan.
+      Sebelumnya panel dan daftar ini sama-sama layout_weight=1 tanpa ada yang
+      mengatur visibilitas yang lain, sehingga saat kotak pencarian kosong layar
+      terbelah 50/50 dan separuh bawah menjadi area hitam kosong - pengguna hanya
+      melihat dua baris judul.
+    -->
+    <include layout="@layout/fragment_list" android:id="@+id/resultsWrap"
+        android:layout_width="match_parent"
         android:layout_height="0dp" android:layout_weight="1"/>
 </LinearLayout>

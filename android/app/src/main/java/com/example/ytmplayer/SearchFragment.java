@@ -21,7 +21,7 @@ public class SearchFragment extends BaseFragment {
     private final Handler h = new Handler(Looper.getMainLooper());
     private Runnable pending;
     private String lastSuggest = "";
-    private View recentPanel, recentEmpty;
+    private View recentPanel, recentEmpty, resultsWrap;
     private TextView recentClear;
     private RecyclerView recentList;
     private Adapters_Recent.SongAdapter songAdapter;
@@ -41,6 +41,7 @@ public class SearchFragment extends BaseFragment {
         recentEmpty = v.findViewById(R.id.recentEmpty);
         recentClear = v.findViewById(R.id.recentClear);
         recentList = v.findViewById(R.id.recentList);
+        resultsWrap = v.findViewById(R.id.resultsWrap);
         recentList.setLayoutManager(new LinearLayoutManager(requireContext()));
 
         // Daftar lagu rata: setiap baris langsung lagu (thumbnail + judul), ketuk
@@ -135,10 +136,16 @@ public class SearchFragment extends BaseFragment {
         for (int i = 0; i < 4; i++) chips[i].setSelected(i == sel);
     }
 
-    /** true = kotak pencarian kosong, tampilkan panel pencarian terakhir. */
+    /** true = kotak pencarian kosong, tampilkan panel lagu terakhir. */
     private void paintRecent(boolean kosong) {
         if (recentPanel == null) return;
         recentPanel.setVisibility(kosong ? View.VISIBLE : View.GONE);
+        // Panel "lagu terakhir" dan daftar hasil pencarian itu BERGANTIAN, bukan
+        // berdampingan. Kalau keduanya terlihat, layar terbelah 50/50 dan separuh
+        // bawah jadi area hitam kosong - itulah gejala "cuma terlihat 2 baris".
+        if (resultsWrap != null) {
+            resultsWrap.setVisibility(kosong ? View.GONE : View.VISIBLE);
+        }
         if (!kosong) return;
         boolean ada = !songs.isEmpty();
         recentList.setVisibility(ada ? View.VISIBLE : View.GONE);
