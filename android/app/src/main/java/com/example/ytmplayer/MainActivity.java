@@ -194,11 +194,33 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
         });
         box.addView(out);
 
+        // Penautan YouTube Music: satu tombol, status hidup dari server.
+        // Pustaka YouTube (bukan koleksi lokal) baru jalan setelah akun ini
+        // menautkan Google sendiri - tiap orang memakai akunnya masing-masing.
+        Button link = new Button(this);
+        link.setText("Hubungkan YouTube Music");
+        link.setBackgroundColor(0xFF2A2D33);
+        link.setTextColor(0xFFFFFFFF);
+        link.setOnClickListener(v -> startActivity(new Intent(MainActivity.this, LinkActivity.class)));
+        box.addView(link);
+
         final TextView status = new TextView(this);
         status.setTextSize(12);
         status.setTextColor(0xFF9AA0A6);
         status.setPadding(0, Ui.dp(this, 8), 0, 0);
         box.addView(status);
+
+        // Status penautan YouTube milik akun yang sedang masuk (bukan akun bersama).
+        Api.googleStatus(this, new Api.Cb<Api.Google>() {
+            @Override public void ok(Api.Google g) {
+                status.setText(g != null && g.linked
+                        ? (g.logged_in
+                          ? "YouTube Music: tersambung ke akun Google Anda."
+                          : "YouTube Music: tersambung, sesi Google kedaluwarsa - sambungkan ulang.")
+                        : "YouTube Music: belum tersambung. Koleksi lokal tetap jalan.");
+            }
+            @Override public void err(String m) { status.setText("Status YouTube tidak terbaca: " + m); }
+        });
 
         new AlertDialog.Builder(this, R.style.DialogTheme)
                 .setTitle("Server relay")

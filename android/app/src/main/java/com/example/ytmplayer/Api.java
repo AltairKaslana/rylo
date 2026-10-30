@@ -495,12 +495,48 @@ public final class Api {
                 + esc(pass) + "\"}", Session.class, cb);
     }
 
-    /** Daftar akun baru. Butuh kunci master (PIN server). */
+    /**
+     * Daftar akun baru.
+     *
+     * Server mode publik memakai KODE UNDANGAN (dibuat Tuan), bukan PIN master:
+     * alamat server bisa dilihat siapa saja, jadi PIN master tidak boleh jadi syarat
+     * yang bisa ditebak. Kode dikirim di body; kalau kosong, server menolak dengan
+     * pesan yang jelas dan layar daftar menampilkannya apa adanya.
+     */
     public static void register(Context c, String user, String pass, String alias,
-                                final Cb<Session> cb) {
+                                String code, final Cb<Session> cb) {
         post(c, "/auth/register", "{\"username\":\"" + esc(user) + "\",\"password\":\""
-                + esc(pass) + "\",\"alias\":\"" + esc(alias) + "\"}",
-                Session.class, cb);
+                + esc(pass) + "\",\"alias\":\"" + esc(alias) + "\",\"code\":\""
+                + esc(code) + "\"}", Session.class, cb);
+    }
+
+    /** Status tautan YouTube Music milik akun yang sedang masuk. */
+    public static class Google {
+        public boolean linked, logged_in;
+    }
+
+    public static void googleStatus(Context c, final Cb<Google> cb) {
+        get(c, "/auth/google", 0, Google.class, cb);
+    }
+
+    /** Cabut tautan YouTube Music akun ini (berkas kredensial di server dihapus). */
+    public static void googleUnlink(Context c, final Cb<Ok> cb) {
+        send(c, "DELETE", "/auth/google", "{}", cb);
+    }
+
+    /**
+     * Alamat halaman penyambungan YouTube (dibuka di WebView, token sesi di query).
+     *
+     * Memakai base() yang sama dengan request lain, termasuk jalur cadangan TLS
+     * untuk HP lama - kalau pakai alamat publik saja, HP KitKat gagal handshake
+     * ECDSA dan halaman ini tidak akan pernah terbuka.
+     */
+    public static String setupUrl(Context c) {
+        Context app = c.getApplicationContext();
+        String s = Prefs.ready(app) ? base(app) : Prefs.server(app);
+        if (s.isEmpty()) s = Prefs.DEFAULT_SERVER;
+        while (s.endsWith("/")) s = s.substring(0, s.length() - 1);
+        return s + "/setup?s=" + Uri.encode(Prefs.session(app));
     }
 
     /** Pindahkan data profil lama ke akun ini. Butuh kunci master. */

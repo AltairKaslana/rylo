@@ -39,6 +39,14 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:text="Khusus admin (tekan lama judul di atas)"
+                android:textColor="#5F6368"
+                android:textSize="11sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
                 android:text="Alamat server"
                 android:textColor="#9AA0A6"
                 android:textSize="12sp" />
@@ -117,6 +125,25 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="Kode undangan (dari Tuan)"
+                android:textColor="#9AA0A6"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/fCode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:hint="mis. 7F3KQ9XM2A"
+                android:inputType="textVisiblePassword"
+                android:singleLine="true"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#5F6368" />
 
             <TextView
                 android:layout_width="match_parent"
