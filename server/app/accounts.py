@@ -26,6 +26,7 @@ DB_PATH = os.getenv("YTM_LIBRARY", "/opt/ytm-relay/library.db")
 
 _ITER = 200_000
 _SESSION_DAYS = 90
+_INVITE_DAYS = int(os.getenv("YTM_INVITE_DAYS", "14"))
 _USER_RE = re.compile(r"^[A-Za-z0-9_.-]{3,24}$")
 
 
@@ -59,7 +60,22 @@ def init():
             expires_at INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(username);
+        CREATE TABLE IF NOT EXISTS invites (
+            code_hash  TEXT PRIMARY KEY,
+            created_at INTEGER,
+            expires_at INTEGER,
+            used_by    TEXT,
+            used_at    INTEGER,
+            note       TEXT
+        );
         """)
+        # kolom tambahan untuk mode publik (database lama tetap jalan)
+        for col in ("ip TEXT", "invite_used TEXT"):
+            try:
+                c.execute(f"ALTER TABLE accounts ADD COLUMN {col}")
+            except sqlite3.OperationalError:
+                pass  # kolom sudah ada
+
 
 
 # ---------- sandi ----------
@@ -97,9 +113,13 @@ def _profile_for(username: str) -> str:
 
 # ---------- daftar / masuk ----------
 
-def register(username, password, alias, master_ok):
-    """Buat akun baru. master_ok wajib True - mendaftar adalah operasi admin."""
-    if not master_ok:
+def register(username, password, alias, master_ok, invite_ok=False, ip=None):
+    """Buat akun baru. Butuh master_ok (admin) ATAU invite_ok (kode undangan terpakai).
+
+    Di mode publik, jalur admin PIN master tetap ada supaya Tuan bisa membuat akun
+    tanpa kode; yang berubah hanya: pendaftar umum wajib menukarkan kode undangan.
+    """
+    if not (master_ok or invite_ok):
         raise PermissionError("Kunci master diperlukan untuk membuat akun")
     username = str(username or "").strip()
     if not valid_username(username):
@@ -109,14 +129,88 @@ def register(username, password, alias, master_ok):
     salt = secrets.token_hex(16)
     profile = _profile_for(username)
     with _conn() as c:
-        if c.execute("SELECT 1 FROM accounts WHERE username=?", (username,)).fetchone():
+        if c.execute("SELECT 1 FROM accounts WHERE username=?",
+                     (username,)).fetchone():
             raise ValueError("Username sudah dipakai")
         c.execute(
-            "INSERT INTO accounts (username,profile,pass_hash,salt,alias,created_at)"
-            " VALUES (?,?,?,?,?,?)",
+            "INSERT INTO accounts (username,profile,pass_hash,salt,alias,created_at,ip)"
+            " VALUES (?,?,?,?,?,?,?)",
             (username, profile, _hash_password(str(password), salt), salt,
-             _alias(alias, username), _now()))
+             _alias(alias, username), _now(), str(ip or "")[:64]))
     return {"username": username, "profile": profile, "alias": _alias(alias, username)}
+
+
+# ---------- kode undangan (mode publik) ----------
+
+def _hash_code(code):
+    return hashlib.sha256(str(code).encode("utf-8")).hexdigest()
+
+
+def create_invite(master_ok, days=None, note=""):
+    """Buat kode undangan baru. Kembalikan kode mentah SEKALI SAJA - yang disimpan hanya hash."""
+    if not master_ok:
+        raise PermissionError("Kunci master diperlukan untuk membuat kode undangan")
+    days = days or _INVITE_DAYS
+    code = secrets.token_urlsafe(9).replace("-", "").replace("_", "")[:12].upper()
+    now = _now()
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO invites (code_hash,created_at,expires_at,used_by,used_at,note)"
+            " VALUES (?,?,?,?,?,?)",
+            (_hash_code(code), now, now + days * 86400, None, None, str(note)[:60]))
+    return {"code": code, "expires_at": now + days * 86400, "days": days}
+
+
+def redeem_invite(code, username, password, alias):
+    """Tukarkan kode undangan: buat akun sekaligus tandai kode sudah terpakai.
+
+    Dicek satu transaksi supaya dua orang tidak bisa memakai kode yang sama bersamaan.
+    """
+    ch = _hash_code(str(code or ""))
+    now = _now()
+    with _conn() as c:
+        row = c.execute("SELECT * FROM invites WHERE code_hash=?", (ch,)).fetchone()
+        if not row:
+            raise PermissionError("Kode undangan tidak dikenal")
+        if row["used_by"]:
+            raise PermissionError("Kode undangan sudah dipakai")
+        if row["expires_at"] < now:
+            raise PermissionError("Kode undangan sudah kedaluwarsa")
+        out = register(username, password, alias, master_ok=False,
+                       invite_ok=True, ip=None)
+        c.execute("UPDATE invites SET used_by=?, used_at=? WHERE code_hash=?",
+                  (out["username"], now, ch))
+    return out
+
+
+def list_invites(master_ok):
+    """Untuk admin: kode mana yang masih tersedia / sudah dipakai siapa."""
+    if not master_ok:
+        raise PermissionError("Kunci master diperlukan")
+    now = _now()
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT created_at, expires_at, used_by, used_at, note FROM invites"
+            " ORDER BY created_at DESC LIMIT 200").fetchall()
+    out = []
+    for r in rows:
+        out.append({
+            "dibuat": r["created_at"], "berlaku_sampai": r["expires_at"],
+            "kedaluwarsa": r["expires_at"] < now,
+            "dipakai_oleh": r["used_by"], "catatan": r["note"] or "",
+        })
+    return out
+
+
+def count_signups_since(ip, since):
+    """Berapa akun terdaftar dari satu IP sejak waktu `since` (batas pendaftaran)."""
+    if not ip:
+        return 0
+    with _conn() as c:
+        return c.execute(
+            "SELECT COUNT(*) FROM accounts WHERE ip=? AND created_at>=?",
+            (str(ip)[:64], int(since))).fetchone()[0]
+
 
 
 def login(username, password):

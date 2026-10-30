@@ -3,6 +3,7 @@ import io
 import os
 import re
 import secrets
+import shutil
 import concurrent.futures
 import time
 from urllib.parse import urlparse
@@ -23,6 +24,31 @@ acc.init()          # tabel akun/sesi, idempoten
 
 if not config.TOKEN:
     raise RuntimeError("Environment variable YTM_TOKEN belum diisi")
+
+
+def _migrate_legacy_auth():
+    """Kredensial lama (satu berkas untuk semua orang) -> AUTH_DIR/owner.json.
+
+    Berkas lama TIDAK dihapus: ia jadi sumber yang bisa diadopsi lewat
+    /auth/google/adopt, jadi kalau migrasi keliru aslinya masih ada.
+    """
+    try:
+        src = config.AUTH_FILE if os.path.isabs(config.AUTH_FILE) \
+            else os.path.join(os.getcwd(), config.AUTH_FILE)
+        if not os.path.exists(src):
+            return
+        os.makedirs(config.AUTH_DIR, exist_ok=True)
+        dst = os.path.join(config.AUTH_DIR, "owner.json")
+        if os.path.exists(dst):
+            return
+        shutil.copyfile(src, dst)
+        os.chmod(dst, 0o600)
+        print(f"[ytm] kredensial lama disalin ke {dst} (berkas asli tetap ada)", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[ytm] migrasi kredensial lama dilewati: {e}", flush=True)
+
+
+_migrate_legacy_auth()
 
 
 def _same(a: str, b: str) -> bool:
@@ -66,11 +92,19 @@ def _rate_fail(ip: str):
 #      (ganti header = baca data profil lain) tetap terbuka.
 def _needs_session(path: str) -> bool:
     return (path.startswith("/lib/") or path == "/profile"
-            or path in ("/auth/login", "/auth/me", "/auth/logout", "/auth/alias"))
+            or path in ("/auth/login", "/auth/me", "/auth/logout", "/auth/alias",
+                        "/auth/register", "/auth/invite", "/auth/invites", "/auth/google",
+                        "/setup"))
 
 
-def auth(request: Request, x_token: str = Header(None), t: str = Query(None)):
-    """Terima token panjang (YTM_TOKEN) atau PIN pendek (YTM_PIN) - PIN untuk diketik di HP."""
+def auth(request: Request, x_token: str = Header(None), t: str = Query(None),
+         x_session: str = Header(None)):
+    """Terima token master, PIN pendek, ATAU token sesi akun biasa (mode publik).
+
+    Kalau pemanggil masuk sebagai akun biasa, request.state.who diisi profile-nya;
+    endpoint katalog lalu memakai kredensial Google milik akun itu. Tanpa sesi,
+    endpoint memakai klien anonim (tetap boleh mencari, radio, putar).
+    """
     ip = (request.client.host if request.client else "?") or "?"
     if _needs_session(request.url.path):
         return                      # diperiksa di dalam endpoint masing-masing
@@ -79,9 +113,22 @@ def auth(request: Request, x_token: str = Header(None), t: str = Query(None)):
     given = x_token or t or ""
     if _same(given, config.TOKEN) or _same(given, config.PIN):
         _FAILS.pop(ip, None)
+        request.state.master = True
         return
+    if x_session:
+        me = acc.me(x_session)
+        if me:
+            _FAILS.pop(ip, None)
+            request.state.who = me["profile"]
+            request.state.acct = me
+            return
     _rate_fail(ip)
-    raise HTTPException(401, "Token/PIN salah")
+    raise HTTPException(401, "Token/PIN/sesi tidak valid")
+
+
+def _who(request: Request):
+    """Profile pemanggil (kalau login sebagai akun), atau None untuk anonim."""
+    return getattr(request.state, "who", None)
 
 
 app = FastAPI(dependencies=[Depends(auth)], docs_url=None, redoc_url=None, openapi_url=None)
@@ -127,64 +174,113 @@ def check_vid(v):
         raise HTTPException(400, "videoId tidak valid")
 
 
+# ---------- kuota per akun (mode publik) ----------
+# Box ini 1,9 GB RAM: kuota bukan untuk menekan pengguna, tapi supaya satu orang
+# yang memutar terus-menerus tidak membuat layanan mati untuk orang lain.
+
+_SEARCH_HITS = {}
+_STREAMS = {}
+_STREAM_LOCK = __import__("threading").Lock()
+
+
+def _search_quota(who):
+    if not (config.PUBLIC and who):
+        return
+    now = time.time()
+    hits = [t for t in _SEARCH_HITS.get(who, []) if now - t < config.SEARCH_WINDOW]
+    if len(hits) >= config.SEARCH_LIMIT:
+        raise HTTPException(429, "Terlalu banyak pencarian, coba lagi beberapa menit")
+    hits.append(now)
+    _SEARCH_HITS[who] = hits
+
+
+def _stream_enter(who):
+    """Pesan satu slot stream. Kembalikan kunci untuk dilepas, atau None kalau anonim."""
+    if not (config.PUBLIC and who):
+        return None
+    with _STREAM_LOCK:
+        n = _STREAMS.get(who, 0)
+        if n >= config.MAX_STREAMS:
+            raise HTTPException(429, f"Terlalu banyak lagu diputar bersamaan (maks {config.MAX_STREAMS})")
+        _STREAMS[who] = n + 1
+    return who
+
+
+def _stream_leave(key):
+    if not key:
+        return
+    with _STREAM_LOCK:
+        _STREAMS[key] = max(0, _STREAMS.get(key, 1) - 1)
+
+
 @app.get("/health")
-def health():
-    return {"ok": True, "authed": catalog.authed()}
+def health(request: Request):
+    return {"ok": True, "authed": catalog.authed(_who(request))}
 
 
 @app.get("/home")
-def home():
-    return {"sections": call(catalog.home)}
+def home(request: Request):
+    who = _who(request)
+    return {"sections": call(catalog.home, who)}
 
 
 @app.get("/search")
-def search(q: str, type: str = "songs"):
-    items = call(catalog.search, q, type)
+def search(q: str, type: str = "songs", request: Request = None):
+    who = _who(request)
+    _search_quota(who)
+    items = call(catalog.search, q, type, who)
     if type == "songs":
         schedule_prefetch([it.get("id") for it in items[:config.PREFETCH]])
     return {"items": items}
 
 
 @app.get("/auth-status")
-def auth_status():
-    """Status login yang jujur: file ada, dan sesinya masih hidup atau sudah dibatalkan Google."""
-    ok = catalog.authed()
-    return {"authed": ok, "logged_in": catalog.session_alive() if ok else False}
+def auth_status(request: Request):
+    """Status tautan Google milik akun pemanggil (bukan akun bersama)."""
+    who = _who(request)
+    ok = catalog.authed(who)
+    return {"authed": ok, "logged_in": catalog.session_alive(who) if ok else False}
 
 
 @app.get("/suggest")
-def suggest(q: str):
+def suggest(q: str, request: Request = None):
     if len(q.strip()) < 2:
         return {"items": []}
-    return {"items": call(catalog.suggest, q)}
+    who = _who(request)
+    return {"items": call(catalog.suggest, q, who)}
 
 
 @app.get("/library")
-def library():
-    if not catalog.authed():
-        raise HTTPException(403, "browser.json belum dipasang (Library butuh login)")
-    return {"items": call(catalog.library)}
+def library(request: Request):
+    who = _who(request)
+    if not catalog.authed(who):
+        raise HTTPException(403, "Akun ini belum menautkan Google - "
+                                 "buka menu Akun lalu pilih Hubungkan YouTube Music")
+    return {"items": call(catalog.library, who)}
 
 
 @app.get("/detail/{kind}/{iid}")
-def detail(kind: str, iid: str):
+def detail(kind: str, iid: str, request: Request = None):
     if kind not in ("album", "artist", "playlist"):
         raise HTTPException(400, "kind tidak valid")
-    return call(catalog.detail, kind, iid)
+    who = _who(request)
+    return call(catalog.detail, kind, iid, who)
 
 
 @app.get("/radio/{vid}")
-def radio(vid: str):
+def radio(vid: str, request: Request = None):
     check_vid(vid)
-    items = call(catalog.radio, vid)
+    who = _who(request)
+    items = call(catalog.radio, vid, who)
     schedule_prefetch([it.get("id") for it in items[:config.PREFETCH]])
     return {"items": items}
 
 
 @app.get("/lyrics/{vid}")
-def lyrics(vid: str):
+def lyrics(vid: str, request: Request):
     check_vid(vid)
-    return {"lyrics": call(catalog.lyrics, vid) or ""}
+    who = _who(request)
+    return {"lyrics": call(catalog.lyrics, vid, who) or ""}
 
 
 @app.get("/prefetch/{vid}")
@@ -239,6 +335,7 @@ def stream_head(vid: str):
 async def stream(vid: str, request: Request):
     """Proxy audio apa adanya (tanpa disimpan), dengan dukungan HTTP Range untuk seek."""
     check_vid(vid)
+    slot = _stream_enter(_who(request))
     rng = request.headers.get("range")
     up = client = None
     for attempt in (0, 1):
@@ -274,6 +371,7 @@ async def stream(vid: str, request: Request):
     async def close():
         await up.aclose()
         await client.aclose()
+        _stream_leave(slot)
 
     return StreamingResponse(up.aiter_raw(), status_code=up.status_code, headers=out,
                              background=BackgroundTask(close))
@@ -290,8 +388,10 @@ SETUP_HTML = """<!doctype html><html><head><meta charset="utf-8">
  .ok{color:#3fb950}.bad{color:#f85149} .muted{color:#8b949e;font-size:13px}
  ol{padding-left:20px} li{margin:4px 0}
 </style></head><body>
-<h1>Login YouTube Music</h1>
-<p class="muted">Sekali saja. Setelah tersimpan, tab Pustaka dan beranda personal akan aktif.</p>
+<h1>Hubungkan YouTube Music</h1>
+<p class="muted">Sekali saja, khusus akun yang sedang masuk. Cookie disimpan
+<strong>hanya untuk akun ini</strong> - pengguna lain memakai akun Google-nya sendiri
+dan tidak bisa melihat data Anda.</p>
 <h2>1. Ambil header dari browser (di PC)</h2>
 <ol>
 <li>Buka <b>music.youtube.com</b> di Chrome/Firefox, pastikan avatar akun muncul di kanan atas.</li>
@@ -306,7 +406,7 @@ SETUP_HTML = """<!doctype html><html><head><meta charset="utf-8">
 <button onclick="save()">Simpan</button>
 <h2>Catatan</h2>
 <p class="muted">Header ini setara kunci akun. Disimpan hanya di server ini
-(<code>/opt/ytm-relay/browser.json</code>, izin 600) dan tidak pernah dikirim ke tempat lain.
+(berkas tersendiri untuk akun Anda, izin 600) dan tidak pernah dikirim ke tempat lain.
 Pakai akun khusus bila ingin memisahkan risiko.</p>
 <script>
 async function save(){
@@ -314,8 +414,11 @@ async function save(){
   const r=document.getElementById('r');
   if(!t){ r.className='bad'; r.textContent='Masih kosong.'; return; }
   r.className='muted'; r.textContent='Menyimpan...';
+  const qs=new URLSearchParams(location.search);
+  const h={};
+  if(qs.get('s')) h['X-Session']=qs.get('s');
   try{
-    const res=await fetch('/setup?t='+encodeURIComponent(location.search.replace('?t=','')),{method:'POST',headers:{'Content-Type':'text/plain'},body:t});
+    const res=await fetch('/setup'+(qs.get('t')?'?t='+encodeURIComponent(qs.get('t')):''),{method:'POST',headers:{'Content-Type':'text/plain',...h},body:t});
     const j=await res.json();
     if(res.ok){ r.className='ok'; r.textContent='Berhasil. authed='+j.authed+' - buka tab Pustaka di aplikasi.'; }
     else { r.className='bad'; r.textContent='Gagal: '+(j.detail||res.status); }
@@ -324,9 +427,27 @@ async function save(){
 </script></body></html>"""
 
 
+def _auth_target(request: Request, x_session: str = Header(None),
+                 x_token: str = Header(None), t: str = Query(None)):
+    """Tentukan berkas kredensial untuk request /setup.
+
+    Jalur biasa: token sesi -> berkas milik akun itu. Jalur lama (token master)
+    tetap diterima supaya Tuan bisa menyiapkan kredensial dari PC; hasilnya masuk
+    ke berkas "owner.json" yang bisa diadopsi akun mana pun lewat /auth/google/adopt.
+    """
+    me = acc.me(x_session) if x_session else None
+    if me:
+        return me["profile"]
+    given = x_token or t or ""
+    if _same(given, config.TOKEN) or _same(given, config.PIN):
+        return "owner"
+    raise HTTPException(401, "Perlu login: buka halaman ini dari aplikasi setelah masuk")
+
+
 @app.get("/setup", response_class=HTMLResponse)
-def setup_page():
-    return SETUP_HTML
+def setup_page(s: str = Query(None), t: str = Query(None)):
+    q = f"?s={s}" if s else (f"?t={t}" if t else "")
+    return SETUP_HTML.replace("/setup'", "/setup" + q + "'")
 
 
 SAPISID_RE = re.compile(r"(?:__Secure-3PAPISID|SAPISID|__Secure-1PAPISID)=([^;\s]+)")
@@ -365,8 +486,10 @@ def _logged_in(cookie: str, raw: str) -> bool:
 
 
 @app.post("/setup")
-async def setup_save(request: Request):
-    """Simpan browser.json dari header yang ditempel pengguna (tidak lewat chat)."""
+async def setup_save(request: Request, x_session: str = Header(None),
+                     x_token: str = Header(None), t: str = Query(None)):
+    """Simpan header YouTube milik satu akun (tidak lewat chat, tidak lewat log)."""
+    who = _auth_target(request, x_session, x_token, t)
     raw = (await request.body()).decode("utf-8", "replace").strip()
     if "cookie" not in raw.lower():
         raise HTTPException(400, "Header harus memuat baris Cookie")
@@ -393,7 +516,8 @@ async def setup_save(request: Request):
                             "Cookie tidak valid atau sesi sudah berakhir - YouTube menyebut belum login. "
                             "Salin ulang header dari request XHR 'browse' saat avatar akun terlihat di kanan atas.")
 
-    target = config.AUTH_FILE if os.path.isabs(config.AUTH_FILE) else os.path.join(os.getcwd(), config.AUTH_FILE)
+    os.makedirs(config.AUTH_DIR, exist_ok=True)
+    target = os.path.join(config.AUTH_DIR, str(who) + ".json")
     try:
         from ytmusicapi import setup as ytm_setup
         ytm_setup(filepath=target, headers_raw=raw)
@@ -403,8 +527,83 @@ async def setup_save(request: Request):
         os.chmod(target, 0o600)
     except OSError:
         pass
-    catalog.reset()
-    return {"ok": True, "authed": catalog.authed()}
+    catalog.reset(who)
+    return {"ok": True, "authed": catalog.authed(who)}
+
+
+# ---------- tautan Google per akun ----------
+
+@app.get("/auth/google")
+def google_status(x_session: str = Header(None)):
+    """Status tautan YouTube Music milik akun yang sedang masuk."""
+    me = acc.me(x_session)
+    if not me:
+        raise HTTPException(401, "Sesi tidak valid atau sudah kedaluwarsa")
+    who = me["profile"]
+    linked = catalog.authed(who)
+    return {"linked": linked,
+            "logged_in": catalog.session_alive(who) if linked else False}
+
+
+@app.delete("/auth/google")
+def google_unlink(x_session: str = Header(None)):
+    """Cabut tautan: hapus berkas kredensial akun ini. Data lokal tidak tersentuh."""
+    me = acc.me(x_session)
+    if not me:
+        raise HTTPException(401, "Sesi tidak valid atau sudah kedaluwarsa")
+    path = catalog.auth_path(me["profile"])
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError as e:
+            raise HTTPException(500, f"Gagal menghapus berkas kredensial: {e}")
+    catalog.reset(me["profile"])
+    return {"ok": True, "linked": False}
+
+
+@app.post("/auth/google/adopt")
+async def google_adopt(x_session: str = Header(None)):
+    """Adopsi kredensial yang disiapkan lewat token master (owner.json) untuk akun ini."""
+    me = acc.me(x_session)
+    if not me:
+        raise HTTPException(401, "Sesi tidak valid atau sudah kedaluwarsa")
+    src = os.path.join(config.AUTH_DIR, "owner.json")
+    if not os.path.exists(src):
+        raise HTTPException(404, "Tidak ada kredensial owner.json yang bisa diadopsi")
+    dst = catalog.auth_path(me["profile"])
+    if dst and os.path.exists(dst):
+        raise HTTPException(400, "Akun ini sudah punya tautan sendiri")
+    os.makedirs(config.AUTH_DIR, exist_ok=True)
+    import shutil
+    shutil.copyfile(src, dst)
+    os.chmod(dst, 0o600)
+    catalog.reset(me["profile"])
+    return {"ok": True, "linked": True}
+
+
+# ---------- kode undangan (mode publik) ----------
+
+@app.post("/auth/invite")
+async def invite_create(request: Request, x_token: str = Header(None), t: str = Query(None)):
+    """Buat kode undangan. Hanya kunci master. Kode mentah hanya muncul sekali."""
+    if not _master_ok(x_token or t or ""):
+        raise HTTPException(403, "Kunci master diperlukan untuk membuat kode undangan")
+    body = await _json(request)
+    try:
+        return acc.create_invite(True, days=body.get("days"), note=body.get("note"))
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+
+
+@app.get("/auth/invites")
+def invite_list(x_token: str = Header(None), t: str = Query(None)):
+    """Daftar kode undangan: mana yang masih kosong, sudah dipakai siapa."""
+    if not _master_ok(x_token or t or ""):
+        raise HTTPException(403, "Kunci master diperlukan")
+    try:
+        return {"items": acc.list_invites(True)}
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
 
 # ---------------- koleksi lokal (tanpa akun YouTube) ----------------
 
@@ -444,19 +643,42 @@ def auth_me(x_session: str = Header(None)):
     who = acc.me(x_session)
     if not who:
         raise HTTPException(401, "Sesi tidak valid atau sudah kedaluwarsa")
-    return who
+    linked = catalog.authed(who["profile"])
+    out = dict(who)
+    out["google"] = {"linked": linked,
+                     "logged_in": catalog.session_alive(who["profile"]) if linked else False}
+    return out
 
 
 @app.post("/auth/register")
 async def auth_register(request: Request, x_token: str = Header(None), t: str = Query(None)):
-    """Buat akun baru. Butuh kunci master - mendaftar adalah operasi admin."""
-    if not _master_ok(x_token or t or ""):
-        raise HTTPException(403, "Kunci master diperlukan untuk membuat akun")
+    """Daftar akun baru.
+
+    Mode publik: wajib kode undangan (dibuat Tuan lewat /auth/invite). Tanpa mode
+    publik, tetap butuh kunci master - supaya alamat server tidak bisa dipakai
+    orang lain membuat akun seenaknya.
+    """
     body = await _json(request)
     u, p, a = _auth_body(body)
+    ip = (request.client.host if request.client else "") or ""
+    master = _master_ok(x_token or t or "")
+    code = str(body.get("code") or "").strip()
     try:
-        info = acc.register(u, p, a, True)
+        if master:
+            info = acc.register(u, p, a, True, ip=ip)
+        elif config.PUBLIC:
+            if not code:
+                raise HTTPException(403, "Pendaftaran memakai kode undangan dari Tuan")
+            if acc.count_signups_since(ip, int(time.time()) - 3600) >= config.SIGNUP_PER_HOUR:
+                raise HTTPException(429, "Terlalu banyak pendaftaran dari jaringan ini, coba lagi nanti")
+            info = acc.redeem_invite(code, u, p, a)
+        else:
+            raise HTTPException(403, "Kunci master diperlukan untuk membuat akun")
         return acc.login(u, p) or info      # langsung masuk setelah daftar
+    except HTTPException:
+        raise
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -691,7 +913,7 @@ def recs(profile: str = Depends(prof), limit: int = 20):
     out, have = [], set()
     for vid in seeds:
         try:
-            for it in catalog.radio(vid):
+            for it in catalog.radio(vid, profile):
                 if it["id"] in have or it["id"] in recent or it["id"] in seeds:
                     continue
                 have.add(it["id"])
@@ -705,7 +927,7 @@ def recs(profile: str = Depends(prof), limit: int = 20):
     if not out:
         # cadangan: ambil dari beranda umum
         try:
-            for sec in catalog.home():
+            for sec in catalog.home(profile):
                 for it in sec.get("items", []):
                     if it.get("kind") == "song" and it["id"] not in have:
                         have.add(it["id"])
@@ -721,16 +943,16 @@ def recs(profile: str = Depends(prof), limit: int = 20):
 
 @app.post("/lib/import")
 def lib_import(profile: str = Depends(prof)):
-    """Impor playlist dari akun YouTube (butuh login aktif). Hasilnya jadi playlist lokal."""
-    if not (catalog.authed() and catalog.session_alive()):
-        raise HTTPException(403, "Perlu login YouTube yang masih aktif untuk impor. "
-                                 "Semua fitur lokal tetap jalan tanpa login.")
+    """Impor playlist dari akun YouTube milik pemanggil (butuh tautan Google). Hasilnya playlist lokal."""
+    if not (catalog.authed(profile) and catalog.session_alive(profile)):
+        raise HTTPException(403, "Perlu menautkan akun YouTube yang masih aktif untuk impor. "
+                                 "Semua fitur lokal tetap jalan tanpa tautan.")
     created = []
-    for src in call(catalog.library):
+    for src in call(catalog.library, profile):
         if not str(src.get("id", "")).startswith(("PL", "LM", "VL")):
             continue
         try:
-            d = catalog.detail("playlist", src["id"])
+            d = catalog.detail("playlist", src["id"], profile)
         except Exception:  # noqa: BLE001
             continue
         pl = lib.playlist_create(profile, src.get("title") or "Impor")

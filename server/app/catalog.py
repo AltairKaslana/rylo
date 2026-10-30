@@ -2,6 +2,12 @@
 
 Klien dibuat malas (lazy): YTMusic() melakukan panggilan jaringan saat dibuat, jadi kalau
 dibuat saat import maka service bisa telat start atau crash-loop ketika jaringan belum siap.
+
+Sejak mode publik, kredensial Google disimpan PER AKUN: <AUTH_DIR>/<profile>.json.
+Pemanggil wajib menyebut akunnya (`who`, nilai = profile) supaya beranda personal dan
+Pustaka memakai kredensial pemilik akun itu, bukan satu kredensial bersama.
+`who=None` berarti klien anonim: cari, beranda publik, radio, lirik, dan putar tetap jalan,
+tapi endpoint yang butuh login menolak dengan jelas (lihat authed()).
 """
 import os
 import threading
@@ -10,54 +16,73 @@ from ytmusicapi import YTMusic
 
 from . import config
 
-_lock = threading.Lock()
-_client = None
-_authed = None
+_guard = threading.Lock()
+_clients = {}
+_locks = {}
 
 
-def authed():
-    """True bila browser.json tersedia (tab Pustaka butuh login)."""
-    global _authed
-    if _authed is None:
-        _authed = os.path.exists(config.AUTH_FILE)
-    return _authed
+def _lock_for(key):
+    with _guard:
+        return _locks.setdefault(key, threading.Lock())
 
 
-def _oauth_mode() -> bool:
-    """True kalau file auth berisi token OAuth (bukan cookie browser)."""
+def auth_path(who):
+    """Berkas kredensial untuk satu akun, atau None kalau akun itu belum menautkan Google."""
+    if not who:
+        return None
+    p = os.path.join(config.AUTH_DIR, str(who) + ".json")
+    return p if os.path.exists(p) else None
+
+
+def authed(who):
+    """True kalau akun ini sudah menautkan Google (browser.json versi per-akun)."""
+    return bool(auth_path(who))
+
+
+def _oauth_mode(path: str) -> bool:
+    """True kalau berkas auth berisi token OAuth (bukan cookie browser)."""
     if not (config.OAUTH_ID and config.OAUTH_SECRET):
         return False
     try:
         import json as _json
-        with open(config.AUTH_FILE, encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return "refresh_token" in _json.load(f)
     except Exception:  # noqa: BLE001
         return False
 
 
-def yt():
-    """Klien YTMusic tunggal, dibuat saat pertama dibutuhkan."""
-    global _client
-    if _client is None:
-        with _lock:
-            if _client is None:
-                if _oauth_mode():
-                    from ytmusicapi.auth.oauth import OAuthCredentials
-                    creds = OAuthCredentials(config.OAUTH_ID, config.OAUTH_SECRET)
-                    _client = YTMusic(config.AUTH_FILE, oauth_credentials=creds)
-                elif authed():
-                    _client = YTMusic(config.AUTH_FILE)
-                else:
-                    _client = YTMusic()
-    return _client
+def yt(who=None):
+    """Klien YTMusic untuk satu akun (atau anonim), dibuat saat pertama dibutuhkan."""
+    key = str(who) if who else "anon"
+    client = _clients.get(key)
+    if client is not None:
+        return client
+    with _lock_for(key):
+        client = _clients.get(key)
+        if client is not None:
+            return client
+        path = auth_path(who)
+        if path and _oauth_mode(path):
+            from ytmusicapi.auth.oauth import OAuthCredentials
+            creds = OAuthCredentials(config.OAUTH_ID, config.OAUTH_SECRET)
+            client = YTMusic(path, oauth_credentials=creds)
+        elif path:
+            client = YTMusic(path)
+        else:
+            client = YTMusic()
+        _clients[key] = client
+        return client
 
 
-def reset():
-    """Paksa klien dibuat ulang (dipakai setelah browser.json dipasang)."""
-    global _client, _authed
-    with _lock:
-        _client = None
-        _authed = None
+def reset(who=None):
+    """Paksa klien dibuat ulang (dipakai setelah kredensial akun dipasang atau dicabut)."""
+    if who is None:
+        with _guard:
+            _clients.clear()
+        return
+    key = str(who)
+    with _lock_for(key):
+        _clients.pop(key, None)
 
 
 def _thumb(x):
@@ -110,35 +135,35 @@ def _clean(items, fallback=""):
     return [i for i in (norm(x, fallback) for x in items) if i]
 
 
-def search(q, kind):
+def search(q, kind, who=None):
     flt = kind if kind in ("songs", "albums", "artists", "playlists") else "songs"
-    return _clean(yt().search(q, filter=flt, limit=25))
+    return _clean(yt(who).search(q, filter=flt, limit=25))
 
 
-def home():
+def home(who=None):
     out = []
-    for s in yt().get_home(limit=6):
+    for s in yt(who).get_home(limit=6):
         items = _clean(s.get("contents") or [])
         if items:
             out.append({"title": s.get("title", ""), "items": items[:20]})
     return out
 
 
-def library():
-    items = _clean(yt().get_library_playlists(limit=50))
+def library(who=None):
+    items = _clean(yt(who).get_library_playlists(limit=50))
     liked = {"kind": "playlist", "id": "LM", "title": "Lagu yang disukai",
              "subtitle": "Playlist", "thumb": "", "dur": 0}
     return [liked] + items
 
 
-def _artist_tracks(d):
+def _artist_tracks(d, who=None):
     """get_artist hanya memberi 5 lagu teratas; ambil daftar penuh lewat browseId-nya."""
     songs = d.get("songs") or {}
     tracks = songs.get("results") or []
     bid = songs.get("browseId")
     if bid:
         try:
-            pl = yt().get_playlist(bid, limit=100)
+            pl = yt(who).get_playlist(bid, limit=100)
             full = pl.get("tracks") or []
             if len(full) > len(tracks):
                 return full
@@ -147,18 +172,21 @@ def _artist_tracks(d):
     return tracks
 
 
-def session_alive():
-    """Cek apakah kredensial di file auth masih hidup (cookie bisa dibatalkan Google)."""
-    if _oauth_mode():
+def session_alive(who=None):
+    """Cek apakah kredensial akun ini masih hidup (cookie bisa dibatalkan Google)."""
+    path = auth_path(who)
+    if not path:
+        return False
+    if _oauth_mode(path):
         try:
-            yt().get_library_playlists(limit=1)
+            yt(who).get_library_playlists(limit=1)
             return True
         except Exception:  # noqa: BLE001
             return False
     try:
         import json as _json
         import httpx
-        h = _json.load(open(config.AUTH_FILE, encoding="utf-8"))
+        h = _json.load(open(path, encoding="utf-8"))
         r = httpx.get("https://music.youtube.com/", timeout=20, follow_redirects=True,
                       headers={"Cookie": h.get("cookie", ""),
                                "User-Agent": h.get("user-agent", "Mozilla/5.0"),
@@ -168,25 +196,25 @@ def session_alive():
         return False
 
 
-def detail(kind, iid):
+def detail(kind, iid, who=None):
     if kind == "playlist" and iid in ("LM", "VLLM"):
         # "Lagu yang disukai" bukan playlist biasa - harus lewat get_liked_songs.
-        d = yt().get_liked_songs(limit=300)
+        d = yt(who).get_liked_songs(limit=300)
         tracks = d.get("tracks") or []
         d["title"] = "Lagu yang disukai"
         sub = "Playlist"
     elif kind == "album":
-        d = yt().get_album(iid)
+        d = yt(who).get_album(iid)
         tracks = d.get("tracks") or []
         year = d.get("year")
         sub = " • ".join(p for p in ["Album", _names(d.get("artists")), str(year) if year else ""] if p)
     elif kind == "artist":
-        d = yt().get_artist(iid)
-        tracks = _artist_tracks(d)
+        d = yt(who).get_artist(iid)
+        tracks = _artist_tracks(d, who)
         d["title"] = d.get("name")
         sub = "Artis"
     else:
-        d = yt().get_playlist(iid, limit=200)
+        d = yt(who).get_playlist(iid, limit=200)
         tracks = d.get("tracks") or []
         sub = " • ".join(p for p in ["Playlist", _names(d.get("author"))] if p)
     thumb = _thumb(d)
@@ -195,23 +223,23 @@ def detail(kind, iid):
             "thumb": thumb, "tracks": songs}
 
 
-def suggest(q):
+def suggest(q, who=None):
     """Saran pencarian saat pengguna mengetik."""
     try:
-        return list(yt().get_search_suggestions(q))[:10]
+        return list(yt(who).get_search_suggestions(q))[:10]
     except Exception:  # noqa: BLE001
         return []
 
 
-def radio(vid):
-    w = yt().get_watch_playlist(videoId=vid, limit=25, radio=True)
+def radio(vid, who=None):
+    w = yt(who).get_watch_playlist(videoId=vid, limit=25, radio=True)
     return [i for i in _clean(w.get("tracks") or []) if i["kind"] == "song" and i["id"] != vid]
 
 
-def lyrics(vid):
-    w = yt().get_watch_playlist(videoId=vid)
+def lyrics(vid, who=None):
+    w = yt(who).get_watch_playlist(videoId=vid)
     lid = w.get("lyrics")
     if not lid:
         return ""
-    l = yt().get_lyrics(lid)
+    l = yt(who).get_lyrics(lid)
     return (l.get("lyrics") if isinstance(l, dict) else getattr(l, "lyrics", "")) or ""
