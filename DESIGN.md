@@ -1,4 +1,4 @@
-# Desain YT Relay
+# Desain Rylo
 
 ## Prinsip
 HP KitKat hanya pemutar+UI. Server Armbian yang login dan bicara ke YouTube, sehingga masalah TLS 1.3, root CA, dan Play Services di KitKat tidak muncul. HP bicara HTTP biasa ke server.

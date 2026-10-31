@@ -1,5 +1,5 @@
 [Unit]
-Description=YTM Relay (server streaming untuk HP KitKat)
+Description=Rylo (server streaming untuk HP KitKat)
 After=network-online.target
 Wants=network-online.target
 

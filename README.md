@@ -1,4 +1,4 @@
-# YT Relay untuk HP KitKat — Panduan Pemasangan
+# Rylo untuk HP KitKat — Panduan Pemasangan
 
 ```
 HP KitKat (app Android, minSdk 19) --HTTP--> Armbian (server/ ytm-relay) --HTTPS--> YouTube Music
