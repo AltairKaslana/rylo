@@ -3,7 +3,11 @@ name: build-apk
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -77,6 +81,18 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ytm-player-release-apk
+          name: rylo-release-apk
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+
+      # Build pada push main / workflow_dispatch tidak membuat release.
+      - name: Publish GitHub Release (tag v*)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: cp android/app/build/outputs/apk/release/app-release.apk "rylo-${GITHUB_REF_NAME}.apk"
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Rylo ${{ github.ref_name }}
+          files: rylo-*.apk

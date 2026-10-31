@@ -204,7 +204,7 @@ public class PlaybackService extends Service implements Playback.Listener {
             try {
                 Item it = pb.current();
                 Notification n = new NotificationCompat.Builder(this, CH)
-                        .setSmallIcon(R.drawable.ic_notif)
+                        .setSmallIcon(R.drawable.ic_stat_rylo)
                         .setContentTitle(it != null ? it.title : "Memutar")
                         .setContentText(it != null ? it.subtitle : "")
                         .setOnlyAlertOnce(true)
@@ -253,7 +253,7 @@ public class PlaybackService extends Service implements Playback.Listener {
         rv.setOnClickPendingIntent(R.id.n_sub, open);
 
         NotificationCompat.Builder b = new NotificationCompat.Builder(this, CH)
-                .setSmallIcon(R.drawable.ic_notif)
+                .setSmallIcon(R.drawable.ic_stat_rylo)
                 .setContentTitle(it != null ? it.title : "Memuat…")
                 .setContentText(it != null ? it.subtitle : "")
                 .setLargeIcon(art)

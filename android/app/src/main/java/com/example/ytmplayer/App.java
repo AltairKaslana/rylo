@@ -16,7 +16,7 @@ import java.util.Locale;
 
 /** Application + penangkap crash: jejak disimpan ke file supaya bisa dilaporkan. */
 public class App extends MultiDexApplication {
-    private static final String TAG = "YTMPlayer";
+    private static final String TAG = "Rylo";
 
     @Override public void onCreate() {
         super.onCreate();
