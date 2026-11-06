@@ -98,12 +98,12 @@ def _needs_session(path: str) -> bool:
 
 
 def auth(request: Request, x_token: str = Header(None), t: str = Query(None),
-         x_session: str = Header(None)):
+         x_session: str = Header(None), s: str = Query(None)):
     """Terima token master, PIN pendek, ATAU token sesi akun biasa (mode publik).
 
     Kalau pemanggil masuk sebagai akun biasa, request.state.who diisi profile-nya;
-    endpoint katalog lalu memakai kredensial Google milik akun itu. Tanpa sesi,
-    endpoint memakai klien anonim (tetap boleh mencari, radio, putar).
+    endpoint katalog lalu memakai kredensial Google milik akun itu. Tanpa master
+    maupun sesi yang sah, request ditolak 401 - tidak ada jalur anonim.
     """
     ip = (request.client.host if request.client else "?") or "?"
     if _needs_session(request.url.path):
@@ -115,8 +115,12 @@ def auth(request: Request, x_token: str = Header(None), t: str = Query(None),
         _FAILS.pop(ip, None)
         request.state.master = True
         return
-    if x_session:
-        me = acc.me(x_session)
+    # ?s= : sesi lewat query. Dipakai URL /stream (dan sejenis) yang dibuka
+    # LANGSUNG oleh ExoPlayer/Glide di HP - pemutar tidak bisa mengirim header
+    # X-Session. Tanpa ini pengguna akun biasa (tanpa kunci master) tidak bisa
+    # memutar lagu maupun memuat cover.
+    if x_session or s:
+        me = acc.me(x_session or s)
         if me:
             _FAILS.pop(ip, None)
             request.state.who = me["profile"]

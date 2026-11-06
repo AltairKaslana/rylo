@@ -98,16 +98,23 @@ public class LoginActivity extends AppCompatActivity {
         android.widget.Toast.makeText(this, m, android.widget.Toast.LENGTH_LONG).show();
     }
 
-    /** Simpan alamat server + kunci master kalau diisi di layar ini. */
+    /**
+     * Simpan alamat server (dan kunci master kalau diisi).
+     *
+     * Kunci master TIDAK lagi wajib di sini: pendaftar publik memakai kode
+     * undangan + token sesi, bukan PIN master. Menuntut PIN dulu membuat tombol
+     * daftar tidak pernah mengirim request - padahal kolomnya disembunyikan dari
+     * pengguna biasa, jadi mereka hanya melihat toast tanpa jalan maju.
+     * PIN tetap dipakai untuk adopsi profil lama (jalan admin).
+     */
     private boolean saveServerIfNeeded() {
         if (Prefs.ready(this)) return true;
         String srv = fServer.getText().toString().trim();
-        String pin = fPin.getText().toString().trim();
-        if (srv.isEmpty() || pin.isEmpty()) {
-            toast("Alamat server dan kunci master belum lengkap");
+        if (srv.isEmpty()) {
+            toast("Alamat server belum diisi");
             return false;
         }
-        Prefs.save(this, srv, pin);
+        Prefs.save(this, srv, fPin.getText().toString().trim());
         return true;
     }
 

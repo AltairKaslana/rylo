@@ -162,7 +162,7 @@ public final class Api {
     private static boolean jawab(String skema, int port, Context c) {
         try {
             Request r = new Request.Builder()
-                    .url(skema + "://" + BORE_HOST + ":" + port + "/health?t=" + enc(Prefs.token(c)))
+                    .url(skema + "://" + BORE_HOST + ":" + port + "/health")
                     .header("X-Profile", Prefs.profile(c)).build();
             Response resp = HTTP.newCall(r).execute();
             int code = resp.code();
@@ -338,6 +338,25 @@ public final class Api {
             b.sslSocketFactory(Net.socketFactory(), Net.trustManager());
             b.hostnameVerifier(Net.pinnedVerifier());
         }
+        // Semua request ke host server kita bawa kredensial di HEADER: sesi akun
+        // kalau ada, kunci master kalau diisi. Ini yang membuat cover (Glide)
+        // muncul untuk pengguna akun biasa - Glide tidak mengirim header sendiri,
+        // dan /img ditolak tanpa auth. URL stream tetap pakai query (?s=) karena
+        // ExoPlayer tidak lewat klien ini.
+        b.addInterceptor(chain -> {
+            Request r = chain.request();
+            if (APP == null) return chain.proceed(r);
+            String host = r.url().host();
+            if (host == null) return chain.proceed(r);
+            boolean ours = host.equals(hostOf(Prefs.server(APP))) || BORE_HOST.equals(host);
+            if (!ours) return chain.proceed(r);
+            Request.Builder rb = r.newBuilder();
+            String sess = Prefs.session(APP);
+            if (!sess.isEmpty()) rb.header("X-Session", sess);
+            String tok = Prefs.token(APP);
+            if (!tok.isEmpty()) rb.header("X-Token", tok);
+            return chain.proceed(rb.build());
+        });
         return b.build();
     }
     private static final Gson GSON = new Gson();
@@ -358,8 +377,24 @@ public final class Api {
         return srv;
     }
 
+    /**
+     * URL audio untuk ExoPlayer.
+     *
+     * ExoPlayer membuka URL ini langsung dan tidak bisa mengirim header, jadi
+     * kredensial ikut di query: sesi akun (?s=) bila sudah masuk, atau kunci
+     * master (?t=) untuk pemasangan lama. Tanpa keduanya server menolak 401 -
+     * memang hanya pemegang akun yang boleh memutar.
+     */
     public static String stream(Context c, String id) {
-        return base(c) + "/stream/" + id + "?t=" + enc(Prefs.token(c));
+        return base(c) + "/stream/" + id + authQuery(c);
+    }
+
+    /** Kredensial untuk URL yang dibuka pemutar (tak bisa header): sesi dulu, master sebagai cadangan. */
+    private static String authQuery(Context c) {
+        String sess = Prefs.session(c);
+        if (!sess.isEmpty()) return "?s=" + enc(sess);
+        String tok = Prefs.token(c);
+        return tok.isEmpty() ? "" : "?t=" + enc(tok);
     }
 
     public static String img(Context c, String url, int px) {

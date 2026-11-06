@@ -68,9 +68,14 @@ public class LinkActivity extends AppCompatActivity {
                 bar.setVisibility(View.GONE);
             }
             @Override public boolean shouldOverrideUrlLoading(WebView v, String url) {
-                // Jangan biarkan halaman ini mengarah ke luar: cukup muat sendiri.
+                // Hanya host server kita sendiri yang boleh dimuat. Halaman /setup
+                // memang memuat skrip dari host Google (Firebase/GCS), tapi itu
+                // subresource - NAVIGASI ke host lain ditolak: halaman luar bisa
+                // membawa token sesi lewat header Referer, atau mengarahkan ke
+                // halaman phishing yang meniru layar login.
                 if (url == null) return true;
-                if (url.startsWith("http://") || url.startsWith("https://")) {
+                String ours = Api.hostOf(Api.setupUrl(LinkActivity.this));
+                if (!ours.isEmpty() && ours.equals(Api.hostOf(url))) {
                     v.loadUrl(url);
                     return true;
                 }

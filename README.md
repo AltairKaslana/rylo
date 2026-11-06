@@ -58,7 +58,7 @@ Atau buka URL `/stream/...` di VLC pada PC. Jangan lanjut ke langkah 2 sebelum t
 ## Langkah 3 — Pasang di HP KitKat
 1. Pengaturan > Keamanan > aktifkan "Sumber tidak dikenal".
 2. Salin APK ke HP (USB/kartu SD/`adb install app-debug.apk`) lalu pasang.
-3. Buka app, isi `http://IP-ARMBIAN:8000` dan token, lalu Simpan. Ubah kapan saja lewat ikon gerigi.
+3. Buka app. Alamat server sudah tertanam (tidak perlu diketik); untuk mengganti alamat atau mengisi kunci master, tekan lama judul "Masuk" 3 detik (jalur admin). Kunci master hanya diperlukan untuk mengadopsi profil lama.
 
 ## Pemecahan masalah
 | Gejala | Penyebab/solusi |
@@ -77,6 +77,24 @@ Cache cover tumbuh perlahan; bersihkan kapan saja dengan `rm -rf /opt/ytm-relay/
 
 ## Akses dari luar rumah (opsional)
 Jangan membuka port 8000 ke internet. KitKat tidak mendukung WireGuard/Tailscale modern, jadi pakai OpenVPN lama ke jaringan rumah, lalu alamat server tetap IP LAN. HTTPS langsung ke domain biasanya gagal di KitKat (root CA usang).
+
+## Bagikan ke orang lain (mode publik)
+Server dengan `YTM_PUBLIC=1` mendaftarkan pengguna memakai **kode undangan** — bukan PIN master. Satu kode = satu orang, sekali pakai, berlaku 14 hari.
+
+Membuat kode (di box, sebagai root; kode mentah hanya muncul SEKALI — server hanya menyimpan hash):
+```bash
+curl -X POST http://127.0.0.1:8000/auth/invite \
+  -H "X-Token: <YTM_TOKEN dari /opt/ytm-relay/env>" \
+  -H 'Content-Type: application/json' \
+  -d '{"note":"nama orang","days":14}'
+```
+Cek status semua kode: `curl http://127.0.0.1:8000/auth/invites -H "X-Token: <YTM_TOKEN>"` — menampilkan kode mana masih kosong, sudah dipakai siapa, dan kapan kedaluwarsa.
+
+Yang dibagikan ke tiap orang: (1) APK dari https://github.com/AltairKaslana/rylo/releases/latest, (2) satu kode undangan. Alamat server sudah tertanam di aplikasi.
+
+Alur mereka: pasang APK → *Belum punya akun? Daftar* → username + sandi (min 6 karakter) + kode → langsung masuk. Opsional: tombol **Hubungkan YouTube Music** menautkan akun Google mereka sendiri lewat kode `youtube.tv/activate` — tanpa itu pun pencarian, radio, dan pemutaran tetap jalan. Kuota per akun: 2 lagu bersamaan, 60 pencarian/10 menit; pendaftaran dibatasi 5 per IP per jam.
+
+Catatan jujur: ini jalur tidak resmi — melanggar ketentuan layanan YouTube dan bisa berhenti bekerja kapan saja. Setiap orang memakai akun Google-nya sendiri, jadi risiko pembatasan jatuh ke akun masing-masing.
 
 ## Batasan
 Tidak ada mode offline, ada jeda 1-3 detik saat memulai lagu yang belum di-prefetch, dan audio tidak disimpan.

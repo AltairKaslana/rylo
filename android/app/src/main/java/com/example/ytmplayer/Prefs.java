@@ -75,7 +75,16 @@ public final class Prefs {
         sp(c).edit().remove("session").remove("username").remove("alias").apply();
     }
 
-    public static boolean ready(Context c) { return !server(c).isEmpty() && !token(c).isEmpty(); }
+    /**
+     * "Siap" berarti alamat server sudah tahu - BUKAN berarti kunci master ada.
+     *
+     * Dulu ready() menuntut keduanya, dan itu justru memblokir pendaftar publik:
+     * pengguna baru tidak punya (dan tidak perlu) kunci master, jadi tombol
+     * daftar/masuk tidak pernah mengirim request. Kunci master hanya untuk
+     * operasi admin (adopsi profil lama); pengguna akun biasa memakai token
+     * sesi. Yang menilai sah-tidaknya adalah server, bukan aplikasi.
+     */
+    public static boolean ready(Context c) { return !server(c).isEmpty(); }
 
     /** True kalau perangkat ini perlu jalur TLS cadangan (sertifikat RSA kita sendiri). */
     public static boolean altTls(Context c) { return sp(c).getBoolean("alt_tls", false); }
