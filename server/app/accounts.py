@@ -75,6 +75,11 @@ def init():
                 c.execute(f"ALTER TABLE accounts ADD COLUMN {col}")
             except sqlite3.OperationalError:
                 pass  # kolom sudah ada
+        # invites.ip: dipakai membatasi permintaan kode dari halaman daftar web
+        try:
+            c.execute("ALTER TABLE invites ADD COLUMN ip TEXT")
+        except sqlite3.OperationalError:
+            pass  # kolom sudah ada
 
 
 
@@ -146,18 +151,61 @@ def _hash_code(code):
     return hashlib.sha256(str(code).encode("utf-8")).hexdigest()
 
 
-def create_invite(master_ok, days=None, note=""):
+def _make_code() -> str:
+    """Kode undangan: 12 karakter A-Z/0-9, mudah diketik ulang dari layar HP."""
+    return secrets.token_urlsafe(9).replace("-", "").replace("_", "")[:12].upper()
+
+
+def create_invite(master_ok, days=None, note="", ip=None):
     """Buat kode undangan baru. Kembalikan kode mentah SEKALI SAJA - yang disimpan hanya hash."""
     if not master_ok:
         raise PermissionError("Kunci master diperlukan untuk membuat kode undangan")
     days = days or _INVITE_DAYS
-    code = secrets.token_urlsafe(9).replace("-", "").replace("_", "")[:12].upper()
+    code = _make_code()
     now = _now()
     with _conn() as c:
         c.execute(
-            "INSERT INTO invites (code_hash,created_at,expires_at,used_by,used_at,note)"
-            " VALUES (?,?,?,?,?,?)",
-            (_hash_code(code), now, now + days * 86400, None, None, str(note)[:60]))
+            "INSERT INTO invites (code_hash,created_at,expires_at,used_by,used_at,note,ip)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (_hash_code(code), now, now + days * 86400, None, None, str(note)[:60],
+             _hash_ip(ip)))
+    return {"code": code, "expires_at": now + days * 86400, "days": days}
+
+
+def _hash_ip(ip):
+    """IP disimpan sebagai hash: cukup untuk membatasi laju, tidak menyimpan alamat asli."""
+    if not ip:
+        return ""
+    return hashlib.sha256(("ip:" + str(ip)).encode("utf-8")).hexdigest()[:32]
+
+
+def count_invites_since(ip, since):
+    """Berapa kode undangan yang dibuat dari satu IP sejak `since` (batas laju web)."""
+    ih = _hash_ip(ip)
+    if not ih:
+        return 0
+    with _conn() as c:
+        return c.execute(
+            "SELECT COUNT(*) FROM invites WHERE ip=? AND created_at>=?",
+            (ih, int(since))).fetchone()[0]
+
+
+def create_signup_invite(ip, days=1, note="daftar web"):
+    """Kode undangan untuk pendaftar dari halaman web.
+
+    Berbeda dari create_invite: tidak butuh kunci master, karena justru pintu
+    masuk pendaftar umum. Batas laju per IP ditegakkan pemanggil (main.py) lewat
+    count_invites_since, supaya kebijakan kuota tetap di satu tempat.
+    """
+    days = max(1, min(int(days or 1), 30))
+    code = _make_code()
+    now = _now()
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO invites (code_hash,created_at,expires_at,used_by,used_at,note,ip)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (_hash_code(code), now, now + days * 86400, None, None,
+             str(note)[:60], _hash_ip(ip)))
     return {"code": code, "expires_at": now + days * 86400, "days": days}
 
 

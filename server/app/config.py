@@ -24,6 +24,11 @@ MAX_STREAMS = int(os.getenv("YTM_MAX_STREAMS", "2"))
 SEARCH_LIMIT = int(os.getenv("YTM_SEARCH_LIMIT", "60"))
 SEARCH_WINDOW = int(os.getenv("YTM_SEARCH_WINDOW", "600"))
 SIGNUP_PER_HOUR = int(os.getenv("YTM_SIGNUP_PER_HOUR", "5"))   # per IP
+# Halaman daftar web: berapa kode akses yang boleh diminta satu IP per jam, dan
+# berapa lama kode itu berlaku. Kode sekali pakai, jadi 1 hari cukup: orang yang
+# minta kode langsung memakainya, dan kode yang tidak terpakai cepat kedaluwarsa.
+SIGNUP_CODES_PER_HOUR = int(os.getenv("YTM_SIGNUP_CODES_PER_HOUR", "3"))
+SIGNUP_CODE_DAYS = int(os.getenv("YTM_SIGNUP_CODE_DAYS", "1"))
 
 # AUTH_DIR: kredensial Google PER AKUN, satu berkas per profil, izin 600.
 # AUTH_FILE lama (satu berkas untuk semua orang) tetap dibaca sebagai pemilik.

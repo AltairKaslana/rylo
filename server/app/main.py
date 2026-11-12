@@ -55,6 +55,21 @@ def _same(a: str, b: str) -> bool:
     return bool(a) and bool(b) and secrets.compare_digest(a.encode(), b.encode())
 
 
+def _client_ip(request: Request) -> str:
+    """IP asli pemanggil.
+
+    Server ini berjalan di belakang cloudflared, jadi `request.client.host` selalu
+    127.0.0.1 dan membatasi laju per IP akan mengunci semua orang sekaligus.
+    Cloudflare mengirim `CF-Connecting-IP`; kalau tidak ada (akses LAN langsung),
+    pakai entri pertama `X-Forwarded-For`, lalu socket.
+    """
+    for header in ("cf-connecting-ip", "x-forwarded-for", "x-real-ip"):
+        value = request.headers.get(header)
+        if value:
+            return value.split(",")[0].strip()[:64]
+    return ((request.client.host if request.client else "") or "?")[:64]
+
+
 _FAILS = {}
 _FAIL_LIMIT = 8          # salah PIN sebanyak ini...
 _FAIL_WINDOW = 600       # ...dalam 10 menit
@@ -94,7 +109,7 @@ def _needs_session(path: str) -> bool:
     return (path.startswith("/lib/") or path == "/profile"
             or path in ("/auth/login", "/auth/me", "/auth/logout", "/auth/alias",
                         "/auth/register", "/auth/invite", "/auth/invites", "/auth/google",
-                        "/setup"))
+                        "/signup", "/setup"))
 
 
 def auth(request: Request, x_token: str = Header(None), t: str = Query(None),
@@ -136,6 +151,20 @@ def _who(request: Request):
 
 
 app = FastAPI(dependencies=[Depends(auth)], docs_url=None, redoc_url=None, openapi_url=None)
+
+# Halaman daftar ada di GitHub Pages (domain lain), jadi browser butuh izin CORS.
+# Dibatasi ke origin situs sendiri; tanpa wildcard, supaya endpoint tidak bisa
+# dipanggil dari halaman orang lain.
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://altairk.my.id", "https://www.altairk.my.id",
+                   "http://127.0.0.1:8907", "http://localhost:8907"],
+    allow_methods=["POST", "GET", "OPTIONS"],
+    allow_headers=["Content-Type"],
+    max_age=600,
+)
 VID = re.compile(r"^[\w-]{11}$")
 IMG_HOSTS = ("googleusercontent.com", "ggpht.com", "ytimg.com")
 os.makedirs(config.IMG_CACHE, exist_ok=True)
@@ -609,6 +638,36 @@ def invite_list(x_token: str = Header(None), t: str = Query(None)):
     except PermissionError as e:
         raise HTTPException(403, str(e))
 
+
+@app.post("/signup")
+async def signup(request: Request):
+    """Minta kode akses dari halaman daftar di altairk.my.id.
+
+    Alur lengkapnya: halaman web memanggil endpoint ini, dapat satu kode sekali
+    pakai, lalu pengguna menempelkan kode itu di aplikasi Rylo saat memilih
+    "Daftar". Akun baru dibuat di aplikasi, bukan di web, supaya sandi tidak
+    pernah menyentuh browser atau server perantara.
+
+    Dijaga dua hal: hanya jalan di mode publik (YTM_PUBLIC=1) dan dibatasi per IP.
+    """
+    if not config.PUBLIC:
+        raise HTTPException(403, "Pendaftaran publik belum dibuka")
+    body = await _json(request)
+    ip = _client_ip(request)
+    now = int(time.time())
+    if acc.count_invites_since(ip, now - 3600) >= config.SIGNUP_CODES_PER_HOUR:
+        raise HTTPException(429, "Sudah minta beberapa kode dari jaringan ini. "
+                                 "Pakai kode yang sudah didapat, atau coba lagi nanti.")
+    try:
+        out = acc.create_signup_invite(ip, days=config.SIGNUP_CODE_DAYS,
+                                       note="web: " + str(body.get("alias") or "")[:20])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, "Gagal membuat kode: " + type(e).__name__)
+    out["server"] = "https://musik.altairk.my.id"
+    out["sisa_kode_jam_ini"] = max(
+        0, config.SIGNUP_CODES_PER_HOUR - acc.count_invites_since(ip, now - 3600))
+    return out
+
 # ---------------- koleksi lokal (tanpa akun YouTube) ----------------
 
 def _master_ok(given: str) -> bool:
@@ -664,7 +723,7 @@ async def auth_register(request: Request, x_token: str = Header(None), t: str = 
     """
     body = await _json(request)
     u, p, a = _auth_body(body)
-    ip = (request.client.host if request.client else "") or ""
+    ip = _client_ip(request)
     master = _master_ok(x_token or t or "")
     code = str(body.get("code") or "").strip()
     try:
@@ -695,7 +754,7 @@ async def auth_login(request: Request):
     # tampak 127.0.0.1 (pitfall 13), jadi kunci IP polos akan mengunci SEMUA pengguna
     # begitu satu orang salah sandi. Dengan kunci ini hanya akun yang ditebak yang
     # terbebani; pengguna lain tetap bisa masuk. Pola sama dengan auth() di atas.
-    ip = (request.client.host if request.client else "?") or "?"
+    ip = _client_ip(request)
     key = f"login:{ip}:{u}"
     if not _rate_check(key):
         raise HTTPException(429, "Terlalu banyak percobaan gagal, coba lagi 10 menit")
