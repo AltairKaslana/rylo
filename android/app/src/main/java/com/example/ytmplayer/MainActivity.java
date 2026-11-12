@@ -194,6 +194,17 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
         });
         box.addView(out);
 
+        // Equalizer: pengaturan per HP (bukan per akun). Suara tiap perangkat beda,
+        // jadi ikut akun justru salah: earbud di HP ini tidak sama dengan speaker
+        // di HP lain.
+        Button eqBtn = new Button(this);
+        eqBtn.setText("Equalizer (" + Eq.PRESETS[Eq.presetIndex(this)]
+                + (Eq.enabled(this) ? ", aktif" : ", mati") + ")");
+        eqBtn.setBackgroundColor(0xFF2A2D33);
+        eqBtn.setTextColor(0xFFFFFFFF);
+        eqBtn.setOnClickListener(v -> EqPanel.show(MainActivity.this));
+        box.addView(eqBtn);
+
         // Penautan YouTube Music: satu tombol, status hidup dari server.
         // Pustaka YouTube (bukan koleksi lokal) baru jalan setelah akun ini
         // menautkan Google sendiri - tiap orang memakai akunnya masing-masing.

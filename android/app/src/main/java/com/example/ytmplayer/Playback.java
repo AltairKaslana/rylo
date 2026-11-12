@@ -55,7 +55,17 @@ public final class Playback {
                 .setHandleAudioBecomingNoisy(true)
                 .setWakeMode(C.WAKE_MODE_NETWORK)
                 .build();
+        // Pemasangan awal: sesi audio sudah tersedia begitu builder selesai.
+        // onAudioSessionIdChanged menangani pembuatan ulang sesi berikutnya.
+        Eq.attach(app, player.getAudioSessionId());
         player.addListener(new Player.Listener() {
+            // Efek audio menempel pada sesi audio ExoPlayer, dan sesi itu baru ada
+            // setelah pemutar dibuat. Dipasang di sini supaya tidak bergantung pada
+            // urutan inisialisasi, dan dipasang ulang otomatis kalau proses
+            // pemutar dibuat ulang oleh sistem.
+            @Override public void onAudioSessionIdChanged(int audioSessionId) {
+                Eq.attach(app, audioSessionId);
+            }
             @Override public void onMediaItemTransition(MediaItem item, int reason) { onTrack(); }
             @Override public void onPlaybackStateChanged(int state) { fire(); }
             @Override public void onIsPlayingChanged(boolean playing) { if (playing) errors = 0; fire(); }
