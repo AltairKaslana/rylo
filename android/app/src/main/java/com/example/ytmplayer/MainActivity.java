@@ -233,6 +233,10 @@ public class MainActivity extends AppCompatActivity implements Playback.Listener
                         toast("Alamat dan PIN belum lengkap");
                         return;
                     }
+                    if (Api.isPlainUrl(srv)) {
+                        toast("Alamat http:// tidak dipakai lagi. Pakai https:// atau ketik alamatnya tanpa http.");
+                        return;
+                    }
                     // Profil tidak lagi diubah dari sini: ia milik akun (username + sandi)
                     // dan diganti lewat layar masuk, supaya data tidak pindah tanpa sadar.
                     Prefs.save(this, srv, pin);

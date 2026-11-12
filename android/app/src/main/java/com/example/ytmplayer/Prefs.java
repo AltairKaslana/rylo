@@ -101,7 +101,13 @@ public final class Prefs {
     public static void save(Context c, String server, String token) {
         String s = server.trim();
         while (s.endsWith("/")) s = s.substring(0, s.length() - 1);
-        if (!s.isEmpty() && !s.startsWith("http")) s = "http://" + s;
+        // Sejak v6.2 alamat tanpa skema selalu dianggap https. Dulu di sini
+        // dipaksa "http://", sehingga server LAN sekalipun dikirimi token sesi
+        // tanpa enkripsi. Bila pengguna memang mengetik http://, nilainya
+        // dibiarkan apa adanya supaya pemanggil bisa menolaknya dengan pesan
+        // yang jelas - bukan diam-diam dinaikkan ke https yang mungkin tidak
+        // dilayani server LAN-nya.
+        if (!s.isEmpty() && !s.contains("://")) s = "https://" + s;
         sp(c).edit().putString("server", s).putString("token", token.trim()).apply();
     }
 }

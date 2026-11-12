@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  aturan jaringan Rylo.
+
+  Semua lalu lintas ke server relay wajib TLS. Yang masih diizinkan tanpa
+  enkripsi hanya loopback, karena Stetho/debug bridge tidak dipakai di build
+  rilis tetapi tetap dibiarkan terbuka di sini supaya build debug tidak gagal.
+  Tanpa berkas ini, usesCleartextTraffic="true" membuka peluang token sesi
+  (header X-Session) melintas tanpa enkripsi ke server mana pun.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

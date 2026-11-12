@@ -114,6 +114,10 @@ public class LoginActivity extends AppCompatActivity {
             toast("Alamat server belum diisi");
             return false;
         }
+        if (Api.isPlainUrl(srv)) {
+            toast("Alamat http:// tidak dipakai lagi. Pakai https:// atau ketik alamatnya tanpa http.");
+            return false;
+        }
         Prefs.save(this, srv, fPin.getText().toString().trim());
         return true;
     }

@@ -60,6 +60,7 @@ public final class Api {
      * Dipakai bila HTTPS Cloudflare gagal karena HP lama tidak mendukung cipher ECDSA.
      */
     private static final String BORE_HOST = "bore.pub";
+
     /**
      * Port tunnel TLS (stunnel). HANYA ini yang masih hidup.
      *
@@ -72,21 +73,27 @@ public final class Api {
      */
     private static final int[] BORE_PORTS = {24193};
     /**
-     * Port HTTP POLOS (bore -> relay, tanpa stunnel). Cadangan TERAKHIR, hanya
-     * dipakai kalau TLS mati total. Skemanya "http" BUKAN "https" - mencoba TLS
-     * ke port ini selalu berakhir "Unable to parse TLS packet header", jadi
-     * skema harus ikut port, jangan diasumsikan https.
+     * Port HTTP POLOS (bore -> relay, tanpa stunnel).
+     *
+     * Sejak v6.2 jalur ini TIDAK dipakai lagi: request yang lewat sini membawa
+     * header X-Session (token sesi) tanpa enkripsi, bahkan melalui tunnel publik
+     * pihak ketiga. Konstanta dipertahankan hanya sebagai penanda bahwa nomor
+     * port itu dikenal; tidak ada kode yang membangun alamat http:// darinya.
      */
     private static final int PLAIN_PORT = 24190;
 
-    /** Alamat tunnel efektif. Skema mengikuti port supaya 24190 tidak dicoba TLS. */
+    /** Selalu https: satu-satunya jalur cadangan yang diizinkan adalah tunnel TLS. */
     public static String boreBase(Context c) {
-        int p = activePort(c);
-        return (p == PLAIN_PORT ? "http" : "https") + "://" + BORE_HOST + ":" + p;
+        return "https://" + BORE_HOST + ":" + activePort(c);
     }
 
     private static boolean hasFallback(String host) {
         return "musik.altairk.my.id".equals(host) || BORE_HOST.equals(host);
+    }
+
+    /** true kalau alamat server yang disimpan memakai http:// (ditolak saat disimpan). */
+    public static boolean isPlainUrl(String url) {
+        return url != null && url.trim().toLowerCase().startsWith("http://");
     }
 
     /**
@@ -152,17 +159,16 @@ public final class Api {
      */
     public static int probePort(Context c) {
         for (int p : BORE_PORTS) {
-            if (jawab("https", p, c)) return p;
+            if (jawab(p, c)) return p;
         }
-        if (jawab("http", PLAIN_PORT, c)) return PLAIN_PORT;
         return 0;
     }
 
     /** true kalau port menjawab (kode HTTP berapa pun). */
-    private static boolean jawab(String skema, int port, Context c) {
+    private static boolean jawab(int port, Context c) {
         try {
             Request r = new Request.Builder()
-                    .url(skema + "://" + BORE_HOST + ":" + port + "/health")
+                    .url("https://" + BORE_HOST + ":" + port + "/health")
                     .header("X-Profile", Prefs.profile(c)).build();
             Response resp = HTTP.newCall(r).execute();
             int code = resp.code();
@@ -176,21 +182,20 @@ public final class Api {
     }
 
     /**
-     * Pindah ke port berikutnya. Hanya dua kemungkinan, dan itu memang yang ada:
-     * port TLS utama, lalu HTTP polos sebagai jalan terakhir.
+     * Pindah ke port berikutnya. Sejak v6.2 hanya ada SATU port cadangan (TLS),
+     * jadi fungsi ini tidak lagi berpindah ke jalur HTTP polos: kalau tunnel TLS
+     * mati, lebih baik permintaan gagal dengan jelas daripada token sesi
+     * melintas tanpa enkripsi.
      *
      * Fungsi ini SENGAJA menyimpan port yang akan dicoba walau belum tentu hidup -
      * yang memperbaikinya adalah onResponse, yang kini akhir benar-benar jalan
      * (lihat call()). Sebelumnya jalur coba-ulang memakai callback asli sehingga
      * keberhasilan tidak pernah tercatat, sementara kegagalan selalu tercatat.
-     * Akibatnya yang diingat justru port yang mati, dan itulah yang membuat
-     * aplikasi menyisir port mati berulang-ulang.
+     * Akibatnya yang diingat justru port yang mati.
      */
     public static int nextPort(Context c) {
-        int cur = activePort(c);
-        int next = (cur != PLAIN_PORT) ? PLAIN_PORT : BORE_PORTS[0];
-        Prefs.setBorePort(c, next);
-        return next;
+        Prefs.setBorePort(c, BORE_PORTS[0]);
+        return BORE_PORTS[0];
     }
 
     private static boolean tlsTrouble(IOException e) {
@@ -372,6 +377,10 @@ public final class Api {
     /** Base URL efektif: jalur TLS cadangan dipakai bila sudah pernah diperlukan. */
     public static String base(Context c) {
         String srv = Prefs.server(c);
+        // Alamat http:// yang tersimpan dari versi lama (v6.1 ke bawah memaksa
+        // skema http untuk apa pun yang diketik tanpa skema) tidak dipakai lagi:
+        // token sesi tidak boleh melintas tanpa enkripsi. Pakai alamat bawaan.
+        if (isPlainUrl(srv)) srv = Prefs.DEFAULT_SERVER;
         if (!Prefs.altTls(c)) return srv;
         if (hasFallback(hostOf(srv))) return boreBase(c);
         return srv;
