@@ -124,12 +124,19 @@ public final class Net {
     /**
      * Verifier hostname.
      *
-     * v6.2: pin per-sertifikat DIHAPUS. Nilai `PIN_FP` adalah sertifikat
-     * self-signed yang ikut dibundel di res/raw, sedangkan yang benar-benar
-     * dilihat klien adalah sertifikat edge Cloudflare - jadi cabang "terima host
-     * apa pun asal sidik jari cocok" tidak pernah aktif dan hanya menyesatkan
-     * pembaca kode. Verifikasi sekarang sepenuhnya milik tumpukan TLS: rantai
-     * sertifikat dan kecocokan host, keduanya wajib.
+     * Jalur utama (`musik.altairk.my.id`) memakai sertifikat Cloudflare, jadi
+     * verifikasi normal dengan benar. Jalur cadangan (`bore.pub:<port>`) menyajikan
+     * sertifikat relay sendiri (CN=musik.altairk.my.id), jadi host tidak akan
+     * pernah cocok - dan pin ini SATU-SATUNYA jalan bagi HP lama yang tidak bisa
+     * TLS modern.
+     *
+     * v6.2 pernah menghapus cabang pin ini karena dianggap mati; keliru. Cabang itu
+     * mati untuk jalur utama, tetapi justru itulah yang menghidupkan jalur
+     * cadangan - tanpanya aplikasi gagal "Failed to connect to bore.pub".
+     *
+     * v6.3: pin diterima HANYA untuk host cadangan (`bore.pub`). Host lain tetap
+     * harus lolos verifikasi normal, jadi sertifikat relay tidak bisa dipakai
+     * menyamar sebagai host sembarang.
      */
     public static javax.net.ssl.HostnameVerifier pinnedVerifier() {
         return new javax.net.ssl.HostnameVerifier() {
@@ -137,19 +144,38 @@ public final class Net {
                     javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier();
 
             @Override public boolean verify(String host, javax.net.ssl.SSLSession session) {
+                // Jalur cadangan: host tidak akan pernah cocok dengan CN sertifikat
+                // relay, jadi pin-lah yang menentukan. Dicek lebih dulu supaya
+                // urutan ini tidak bergantung pada perilaku verifier bawaan KitKat.
+                if ("bore.pub".equalsIgnoreCase(host) && cocokPinRelay(session)) return true;
                 try { return dflt.verify(host, session); } catch (Throwable ignored) { }
                 return false;
             }
         };
     }
 
+    /** true kalau sertifikat peer persis sertifikat relay kita (SHA-256). */
+    private static boolean cocokPinRelay(javax.net.ssl.SSLSession session) {
+        try {
+            java.security.cert.Certificate[] chain = session.getPeerCertificates();
+            if (chain == null || chain.length == 0) return false;
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] fp = md.digest(chain[0].getEncoded());
+            StringBuilder sb = new StringBuilder();
+            for (byte b : fp) sb.append(String.format("%02x", b));
+            return PIN_FP.equals(sb.toString());
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     /**
      * SHA-256 sertifikat relay (hex, tanpa titik dua).
      *
-     * TIDAK dipakai lagi sejak v6.2. Nilainya sertifikat self-signed origin yang
-     * tidak pernah sama dengan sertifikat edge Cloudflare yang dilihat klien,
-     * jadi pin ini selalu meleset. Disimpan hanya sebagai rujukan bila suatu saat
-     * pinning SPKI (dengan pin cadangan + jalur pemulihan) dipasang kembali.
+     * Sertifikat self-signed yang disajikan stunnel lewat bore.pub. Sejak v6.3
+     * pin ini dipakai lagi, tetapi HANYA untuk host `bore.pub` (lihat
+     * `pinnedVerifier()`). Untuk `musik.altairk.my.id` yang dilihat klien adalah
+     * sertifikat edge Cloudflare, jadi pin ini tidak berlaku di sana.
      */
     private static final String PIN_FP =
             "32d2762b0a17e800dd99a7d6f9637f08c847dca6c9ba2e000ada2a3d9966b1ea";
