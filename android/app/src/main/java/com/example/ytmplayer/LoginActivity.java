@@ -49,6 +49,7 @@ public class LoginActivity extends AppCompatActivity {
         hint = findViewById(R.id.loginHint);
         fServer = findViewById(R.id.fServer);
         fPin = findViewById(R.id.fPin);
+        fCode = findViewById(R.id.fCode);
         fUser = findViewById(R.id.fUser);
         fPass = findViewById(R.id.fPass);
         fAlias = findViewById(R.id.fAlias);
