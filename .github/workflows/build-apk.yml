@@ -95,4 +95,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: Rylo ${{ github.ref_name }}
-          files: rylo-*.apk
+          # Sengaja satu nama pasti, bukan rylo-*.apk: pola glob pernah ikut
+          # mengunggah APK lama yang ter-commit sehingga Release membawa versi usang.
+          files: rylo-${{ github.ref_name }}.apk

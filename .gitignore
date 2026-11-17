@@ -13,3 +13,12 @@ __pycache__/
 android/.gradle/
 android/app/build/
 .gradle/
+
+# APK hasil build / Release - jangan pernah masuk repo.
+# Workflow release menyalin APK ke rylo-*.apk di root, lalu pola glob di
+# `files: rylo-*.apk` mengunggah SEMUA yang cocok. Kalau APK lama ter-commit,
+# tiap Release ikut membawa versi usang.
+*.apk
+*.apks
+*.aab
+rylo-*.apk
