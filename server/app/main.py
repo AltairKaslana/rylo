@@ -212,8 +212,11 @@ def check_vid(v):
 # yang memutar terus-menerus tidak membuat layanan mati untuk orang lain.
 
 _SEARCH_HITS = {}
+# who -> {"n": request aktif, "last": kapan terakhir dipakai, "stale": rilis yang
+# harus dianggap bocor}
 _STREAMS = {}
 _STREAM_LOCK = __import__("threading").Lock()
+_STREAM_IDLE = 60      # detik tanpa request baru sebelum slot dianggap bocor
 
 
 def _search_quota(who):
@@ -231,19 +234,50 @@ def _stream_enter(who):
     """Pesan satu slot stream. Kembalikan kunci untuk dilepas, atau None kalau anonim."""
     if not (config.PUBLIC and who):
         return None
+    now = time.time()
     with _STREAM_LOCK:
-        n = _STREAMS.get(who, 0)
-        if n >= config.MAX_STREAMS:
+        st = _STREAMS.setdefault(who, {"n": 0, "last": now, "stale": 0})
+        # Rilis yang tidak pernah jalan (lihat _stream_release) bukan penanda beban:
+        # buang dulu, jangan biarkan sisa kebocoran lama menolak permintaan baru.
+        if st["stale"]:
+            st["n"] = max(0, st["n"] - st["stale"])
+            st["stale"] = 0
+        # Semua request sudah berhenti lebih dari _STREAM_IDLE detik, jadi hitungan
+        # yang tersisa pasti bocor. Pemutar terus meminta potongan audio selama lagu
+        # berjalan, jadi slot yang benar-benar aktif tidak pernah diam selama itu.
+        if st["n"] > 0 and now - st["last"] > _STREAM_IDLE:
+            st["n"] = 0
+        st["last"] = now
+        if st["n"] >= config.MAX_STREAMS:
             raise HTTPException(429, f"Terlalu banyak lagu diputar bersamaan (maks {config.MAX_STREAMS})")
-        _STREAMS[who] = n + 1
+        st["n"] += 1
     return who
 
 
-def _stream_leave(key):
+def _stream_release(key):
+    """Lepas slot. Aman dipanggil lebih dari sekali, dan untuk kunci yang tidak dipakai.
+
+    Dipanggil dari blok finally di dalam generator respons, bukan dari background
+    task: Starlette menjalankan background task hanya kalau responsnya tuntas, dan
+    justru kasus yang dulu memblokir pengguna adalah HP yang memutus koneksi
+    (ExoPlayer membatalkan permintaan Range saat seek/geser lagu). Hitungan yang
+    tidak pernah berkurang membuat pemiliknya kena 429 permanen sampai service
+    di-restart.
+    """
     if not key:
         return
     with _STREAM_LOCK:
-        _STREAMS[key] = max(0, _STREAMS.get(key, 1) - 1)
+        st = _STREAMS.get(key)
+        if not st:
+            return
+        if st["n"] > 0:
+            st["n"] -= 1
+        else:
+            # Jangan tambah negatif: satu rilis berlebih dari proses yang sedang
+            # menyusul (idle reset) harus dipotong dari hitungan berikutnya.
+            st["stale"] += 1
+        if st["n"] == 0 and st["stale"] == 0:
+            _STREAMS.pop(key, None)
 
 
 @app.get("/health")
@@ -369,6 +403,14 @@ async def stream(vid: str, request: Request):
     """Proxy audio apa adanya (tanpa disimpan), dengan dukungan HTTP Range untuk seek."""
     check_vid(vid)
     slot = _stream_enter(_who(request))
+    try:
+        return await _stream_open(vid, request, slot)
+    except BaseException:
+        _stream_release(slot)
+        raise
+
+
+async def _stream_open(vid: str, request: Request, slot):
     rng = request.headers.get("range")
     up = client = None
     for attempt in (0, 1):
@@ -401,13 +443,20 @@ async def stream(vid: str, request: Request):
     keep = ("content-type", "content-length", "content-range", "accept-ranges")
     out = {k: v for k, v in up.headers.items() if k.lower() in keep}
 
-    async def close():
-        await up.aclose()
-        await client.aclose()
-        _stream_leave(slot)
+    async def body():
+        # finally: slot dilepas juga saat HP memutus koneksi di tengah lagu.
+        # Background task StreamingResponse tidak dijalankan untuk kasus itu, dan
+        # itulah yang dulu mengunci pengguna dengan 429 permanen.
+        try:
+            async for chunk in up.aiter_raw():
+                yield chunk
+        finally:
+            _stream_release(slot)
+            await up.aclose()
+            await client.aclose()
 
-    return StreamingResponse(up.aiter_raw(), status_code=up.status_code, headers=out,
-                             background=BackgroundTask(close))
+    return StreamingResponse(body(), status_code=up.status_code, headers=out,
+                             background=BackgroundTask(up.aclose))
 
 SETUP_HTML = """<!doctype html><html><head><meta charset="utf-8">
 <title>Login YouTube Music</title><meta name="viewport" content="width=device-width,initial-scale=1">

@@ -212,8 +212,16 @@ def create_signup_invite(ip, days=1, note="daftar web"):
 def redeem_invite(code, username, password, alias):
     """Tukarkan kode undangan: buat akun sekaligus tandai kode sudah terpakai.
 
-    Dicek satu transaksi supaya dua orang tidak bisa memakai kode yang sama bersamaan.
+    Validasi (nama, sandi, nama sudah dipakai) dijalankan SEBELUM kode dikunci,
+    supaya salah ketik username tidak menghanguskan kode sekali pakai. Pengecekan
+    ulang dan penandaan kode terjadi dalam satu transaksi, jadi dua orang tidak bisa
+    memakai kode yang sama bersamaan.
     """
+    username = str(username or "").strip()
+    if not valid_username(username):
+        raise ValueError("Username 3-24 karakter, hanya huruf/angka/titik/strip/garis bawah")
+    if not password or len(str(password)) < 6:
+        raise ValueError("Sandi minimal 6 karakter")
     ch = _hash_code(str(code or ""))
     now = _now()
     with _conn() as c:
@@ -224,6 +232,8 @@ def redeem_invite(code, username, password, alias):
             raise PermissionError("Kode undangan sudah dipakai")
         if row["expires_at"] < now:
             raise PermissionError("Kode undangan sudah kedaluwarsa")
+        if c.execute("SELECT 1 FROM accounts WHERE username=?", (username,)).fetchone():
+            raise ValueError("Username sudah dipakai")
         out = register(username, password, alias, master_ok=False,
                        invite_ok=True, ip=None)
         c.execute("UPDATE invites SET used_by=?, used_at=? WHERE code_hash=?",
